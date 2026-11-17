@@ -1,0 +1,284 @@
+# Gul Khan Fast Food — User Guide
+
+A short guide for the owner and the counter staff. No computer knowledge needed.
+
+---
+
+## 1. Starting the app
+
+Double-click the **Gul Khan Fast Food** icon on the desktop.
+
+- The first time, it asks you to sign in with **admin / admin123**, then makes you choose a new
+  password. Choose something you will remember — write it down somewhere safe.
+- If the app is already open, clicking the icon brings the open window back instead of opening a
+  second copy.
+- If the window does not appear, wait 10 seconds and try again. The app is starting.
+
+To close the app, click the **✕** in the top-right corner, or **Sign out** first and then close it.
+Closing normally is important: the app makes a **backup** every time it closes.
+
+---
+
+## 2. Signing in
+
+1. Type your **username** and **password**.
+2. Click **Sign in**.
+
+Three kinds of account:
+
+| Account | Who it is for | What they can open |
+| --- | --- | --- |
+| **Admin** | The owner | Everything, including Settings and Users |
+| **Manager** | Shift in-charge | Dashboard, Orders, Menu, Staff, Vehicles, Reports |
+| **Cashier** | Counter staff | Dashboard, Orders, Menu (can mark items sold out) |
+
+A cashier **cannot** see salaries, vehicle costs, reports, settings or other users' accounts.
+
+**If you forget your password**, the admin can reset it from **Users**. If the admin forgets theirs,
+call the technician — do not reinstall the app.
+
+**After 5 wrong passwords** the account is locked for 15 minutes. Wait, then try again.
+
+---
+
+## 3. Dashboard (the first screen)
+
+Shows how the shop is doing today:
+
+- **Today's sales** and **today's orders**
+- **Month to date** sales
+- **Pending deliveries** — orders that have not gone out yet
+- A **7-day trend** so you can see busy and quiet days
+- **Recent orders** — click one to open its invoice
+- **Vehicle reminders** in amber/red when a bike's registration or insurance is expiring
+
+---
+
+## 4. Taking an order (the cashier's main job)
+
+1. Click **New Order** (left sidebar, or the dashboard button).
+2. Click the items the customer wants. Each click adds one. Use **+ / −** in the cart to change
+   quantity, or the bin icon to remove a line.
+3. Choose the order type:
+   - **Dine-in** → pick the waiter's name
+   - **Takeaway** → nothing else needed
+   - **Delivery** → type the **phone number and address**, and pick the **delivery boy**
+4. If the shop gives a discount, type it in **Discount**.
+5. Check the **Total** at the bottom, then click **Save order**.
+
+The invoice opens automatically. Hotkeys: **Enter** saves the order, **Esc** closes a popup.
+
+### Printing the invoice
+
+On the invoice screen:
+
+- **Print** — choose the receipt printer. Use the **80mm** option for the thermal roll printer and
+  **A4** for a normal sheet.
+- **Save PDF** — saves a copy in `Documents\Gul Khan Fast Food`. Useful to send on WhatsApp.
+- **Reprint** — print an old invoice again from the Orders list.
+
+> If the printer prints on the wrong paper size, change **Receipt paper** in **Settings**.
+
+### Finding an old order
+
+Go to **Orders**. You can:
+
+- Type a **phone number** or order number in the search box
+- Filter by **status** (Pending, Preparing, Ready, Delivered, Cancelled)
+- Filter by **date**
+
+Click an order to open it, change its status, print it again, or cancel it.
+
+**Order status:** `Pending → Preparing → Ready → Delivered`. You cannot go backwards. An order can
+be cancelled until it is delivered — the app asks you to confirm first.
+
+---
+
+## 5. Menu and prices (admin / manager)
+
+Go to **Menu**.
+
+- **Add category** — Burgers, Pizza, Drinks, etc.
+- **Add item** — name, price, category, optional photo.
+- **Edit** — change the name or price.
+- **Sold out** — switch an item off. It stays on old invoices but cannot be added to new orders.
+- **Delete** — only for items you created by mistake. A category that still has items cannot be
+  deleted; move or delete the items first.
+
+> Changing a price **does not** change old invoices. They keep the price at the time of sale. This
+> is correct and intentional.
+
+Prices are typed in rupees and paisa, e.g. `350.50`.
+
+---
+
+## 6. Staff, attendance and salaries (admin / manager)
+
+Go to **Staff**. There are two tabs: **Waiters** and **Delivery boys**.
+
+### Adding a person
+
+Click **Add waiter** / **Add delivery boy** and fill in the name, phone, CNIC, address, join date
+and **monthly salary**. For delivery boys also set the **commission %** they earn on deliveries.
+
+### Marking attendance
+
+Open a person and tap a day on the calendar. Each tap changes the day:
+
+`Present → Half day → Leave → Absent → clear`
+
+Mark attendance **every day** — the salary is calculated from it.
+
+### Advances
+
+If a staff member takes money early in the month, click **Add advance** and record the amount and
+date. It is subtracted from the month's salary automatically. A future date is not allowed.
+
+### Salary slip
+
+Open a person and pick the month. The slip shows:
+
+- **Per day** amount (monthly salary ÷ days in the month)
+- **Present** days, **half days**, leaves and absences
+- **Earned salary** — present × per day, plus half of per day for each half day
+- **Commission** — the delivery boy's share of the deliveries he made
+- **Advances** and any **deductions** you type in
+- **Net pay** — the amount to hand over
+
+Click **Pay salary** when you have paid. This records the date and **blocks paying the same month
+twice**, so you cannot pay twice by mistake.
+
+> Removing a person from the list does not delete their history. Old orders, attendance and salary
+> slips still show their name.
+
+---
+
+## 7. Vehicles (admin / manager)
+
+Go to **Vehicles**.
+
+- **Add vehicle** — bike or car, number plate, model, colour, and the **registration** and
+  **insurance expiry dates**.
+- **Assign** — pick the delivery boy who takes the bike. Only one rider per vehicle, and one vehicle
+  per rider; assigning the rider a second vehicle releases the first.
+- **Release** — when a rider leaves or the bike goes to the workshop.
+- **History** — see who had the vehicle and when, plus this month's costs.
+- **Add expense** — record **fuel**, **maintenance** (oil, tyres, chain) or other costs.
+
+The **Dashboard** warns you in amber when a document expires within 30 days, and in red when it has
+already expired. Renew on time — the police do not care that the app beeped.
+
+---
+
+## 8. Reports (admin / manager)
+
+Go to **Reports**. Pick a date range with the buttons: **Today**, **Last 7 days**, **This month**,
+**Last month**, or type your own dates.
+
+| Tab | Shows |
+| --- | --- |
+| **Sales** | Daily sales table, totals, discount given, cancelled count, split by order type |
+| **Top items** | What sells the most, by quantity and revenue |
+| **Deliveries** | Deliveries per rider and their commission |
+| **Salaries** | Net pay for every staff member for a chosen month, and whether it is paid |
+| **Vehicle costs** | Fuel, maintenance and total per vehicle |
+
+Click **Export CSV** to save the open tab and open it in Excel. Files go to
+`Documents\Gul Khan Fast Food`.
+
+---
+
+## 9. Users (admin only)
+
+Go to **Users** to:
+
+- **Add** a cashier, manager or another admin
+- **Reset password** when someone forgets theirs
+- **Disable** a person who has left — they can no longer sign in, but their old orders keep their
+  name
+- **Change role**
+
+The app will not let you disable or demote the **last active admin** — otherwise nobody could open
+Settings again.
+
+---
+
+## 10. Settings (admin only)
+
+- **Shop details** — name, address, phone. These print on the invoice.
+- **Logo** — appears in the app and on invoices. Use a square PNG or JPG.
+- **Currency label** — usually `Rs`.
+- **Default tax %** — starts every new order at this percentage. Set `0` if you do not charge tax.
+- **Receipt paper** — 80mm thermal or A4.
+- **Backup on close** — leave this **on**.
+- **Backups** — see the list, click **Create backup now**, or **Restore** an older backup.
+
+---
+
+## 11. Backups — the most important habit
+
+The app keeps your data in one file on this computer. If the computer's hard disk dies, that data is
+gone unless you have a backup.
+
+The app already:
+
+- Makes a backup **every time it closes**
+- Keeps the last **7** backups in `%APPDATA%\gul-khan-fast-food\backups`
+
+**What you must do:** once a week, copy the newest backup file to a **USB drive** (or Google
+Drive / WhatsApp to yourself). A backup on the same computer does not survive a theft, a fire or a
+dead disk.
+
+### Restoring a backup
+
+1. **Settings → Backups**
+2. Find the right date, click **Restore**, and confirm.
+3. The app keeps a safety copy of the current data first, then restarts with the old data.
+
+Only files ending in `.db` from the backups folder can be restored.
+
+---
+
+## 12. Common problems
+
+| Problem | What to do |
+| --- | --- |
+| **"Username or password is not correct"** | Check Caps Lock. After 5 tries the account locks for 15 minutes. The admin can reset the password. |
+| **"You don't have access to this page"** | That account's role does not include the page. Ask the admin. |
+| **Item is greyed out on New Order** | It is marked **sold out**. Turn it back on in **Menu**. |
+| **"Delivery needs a phone number and address"** | Fill in both before saving. |
+| **"This month's salary is already paid"** | Correct — it was recorded earlier. Check the paid date on the slip. |
+| **Printer prints on the wrong size** | Change **Receipt paper** in Settings, then print again. |
+| **Window is blank / white** | Close the app completely and start it again. |
+| **App says the database cannot be opened** | Another copy is probably already running. Close it (check the taskbar) and try again. |
+| **A bike reminder will not go away** | It clears only after you enter the new expiry date in **Vehicles**. |
+
+If something else goes wrong, note the time and what you were doing, then open
+`%APPDATA%\gul-khan-fast-food\logs\app.log` — the technician will need it. The log rotates
+automatically, so it never grows without limit.
+
+---
+
+## 13. Good daily habits
+
+**Morning:** start the app, check the dashboard loads, check today's date.
+**During the day:** mark attendance, take orders, print invoices, update statuses.
+**Evening:** close any pending deliveries, count the cash against the day's sales report,
+then **close the app** so it backs up.
+**Weekly:** copy the newest backup to a USB drive.
+
+---
+
+## 14. Quick reference
+
+| I want to… | Go to |
+| --- | --- |
+| Take an order | **New Order** |
+| Reprint an invoice | **Orders** → click the order → **Print** |
+| Change a price | **Menu** → item → **Edit** |
+| Mark someone absent | **Staff** → person → tap the day |
+| See what a rider earned | **Staff** → rider → month → salary slip |
+| Know today's sales | **Dashboard**, or **Reports → Today** |
+| Give the accountant numbers | **Reports** → pick the tab → **Export CSV** |
+| Reset a forgotten password | **Users** → **Reset password** |
+| Back up to USB | **Settings** → Backups → copy the newest file |

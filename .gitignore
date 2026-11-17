@@ -1,0 +1,23 @@
+node_modules/
+dist/
+dist-electron/
+release/
+logs/
+*.log
+
+# Local databases / backups (never commit shop data)
+*.db
+*.db-shm
+*.db-wal
+data/
+backups/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Caches
+.vite/
+.eslintcache
