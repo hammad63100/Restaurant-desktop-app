@@ -271,8 +271,19 @@ await runner.check('the Windows installer is configured correctly', async () => 
   // Migrations ship with the compiled main process.
   const migrations = path.join(root, 'dist-electron', 'electron', 'db', 'migrations');
   const sqlFiles = fs.readdirSync(migrations).filter((file) => file.endsWith('.sql'));
-  if (sqlFiles.length !== 7) {
-    throw new Error(`expected 7 migrations in the build, found ${sqlFiles.length}`);
+
+  // Compare the build against the source directory rather than a magic number.
+  const sourceMigrations = path.join(root, 'electron', 'db', 'migrations');
+  const sourceFiles = fs.readdirSync(sourceMigrations).filter((file) => file.endsWith('.sql'));
+
+  if (sqlFiles.length !== sourceFiles.length) {
+    throw new Error(
+      `build has ${sqlFiles.length} migrations but the source has ${sourceFiles.length}`,
+    );
+  }
+  for (const file of sourceFiles) {
+    if (!sqlFiles.includes(file))
+      throw new Error(`migration ${file} was not copied into the build`);
   }
 });
 

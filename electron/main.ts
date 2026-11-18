@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
-import { copyFileSync, existsSync, readFileSync, unlinkSync } from 'node:fs';
+import { copyFileSync, existsSync, readdirSync, unlinkSync } from 'node:fs';
 import { closeDatabase, getDatabase, openDatabase } from './db/connection';
 import { runMigrations } from './db/migrate';
 import { createUserRepository } from './db/repositories/userRepository';
@@ -10,10 +10,14 @@ import { createOrdersRepository } from './db/repositories/ordersRepository';
 import { createStaffRepository } from './db/repositories/staffRepository';
 import { createVehiclesRepository } from './db/repositories/vehiclesRepository';
 import { createSequenceRepository } from './db/repositories/sequenceRepository';
+import { createPaymentsRepository } from './db/repositories/paymentsRepository';
+import { createShiftsRepository } from './db/repositories/shiftsRepository';
+import { createDiscountsRepository } from './db/repositories/discountsRepository';
 import { seedDefaultAdmin } from './db/seed';
 import { seedDemoData } from './db/seedDemo';
 import { createAuthService } from './services/authService';
 import { createSettingsService } from './services/settingsService';
+import { createLogoService } from './services/logoService';
 import { createUserService } from './services/userService';
 import { createCatalogService } from './services/catalogService';
 import { createOrdersService } from './services/ordersService';
@@ -21,10 +25,18 @@ import { createStaffService } from './services/staffService';
 import { createVehiclesService } from './services/vehiclesService';
 import { createReportsService } from './services/reportsService';
 import { createCsvService } from './services/csvService';
+import { createPaymentsService } from './services/paymentsService';
+import { createShiftsService } from './services/shiftsService';
+import { createDiscountsService } from './services/discountsService';
+import { createKotService } from './services/kotService';
+import { createKotRepository } from './db/repositories/kotRepository';
+import { createTablesRepository } from './db/repositories/tablesRepository';
+import { createTablesService } from './services/tablesService';
 import { createBackupService } from './services/backupService';
 import { createPrintService } from './services/printService';
 import { buildRegistry, dispatch } from './ipc';
 import { configureLogger, logError, logInfo } from './services/logger';
+import { monthEnd, monthStart } from './utils/datetime';
 import type { AuthService } from './services/authService';
 
 const isDev = !app.isPackaged;
@@ -35,6 +47,7 @@ let mainWindow: BrowserWindow | null = null;
 let authService: AuthService | null = null;
 let registry: ReturnType<typeof buildRegistry> | null = null;
 let backupServiceInstance: ReturnType<typeof createBackupService> | null = null;
+let logoServiceInstance: ReturnType<typeof createLogoService> | null = null;
 
 function databaseFile(): string {
   return path.join(app.getPath('userData'), 'data', 'fastfood.db');
@@ -44,6 +57,15 @@ function migrationsDirectory(): string {
   // Copied next to the compiled JS by scripts/copy-electron-assets.mjs,
   // so the same relative path works in dev, in the asar build and in tests.
   return path.join(__dirname, 'db', 'migrations');
+}
+
+/** Highest migration number shipped with this build — a backup from a newer one is refused. */
+function supportedSchemaVersion(): number {
+  const directory = migrationsDirectory();
+  return readdirSync(directory)
+    .filter((file) => /^\d{3,}_.+\.sql$/.test(file))
+    .map((file) => Number(file.slice(0, file.indexOf('_'))))
+    .reduce((highest, version) => Math.max(highest, version), 0);
 }
 
 function backupDirectory(): string {
@@ -73,12 +95,27 @@ async function bootstrapServices(): Promise<void> {
 
   // Repositories prepare statements, so they are created after migrations.
   const users = createUserRepository(db);
-  const settingsRepo = createSettingsRepository(db);
+  const logoService = createLogoService(() => path.join(app.getPath('userData'), 'branding'));
+  logoServiceInstance = logoService;
+
+  const settingsRepo = createSettingsRepository(
+    db,
+    // Reading resolves a stored file name back into a printable data URL; writing
+    // moves any inline data URL into the branding folder. The settings row keeps a
+    // short file name, so it cannot bloat the database or the backups.
+    (stored) => logoService.resolve(stored),
+    (dataUrl) => logoService.adoptLegacyDataUrl(dataUrl),
+  );
   const catalogRepo = createCatalogRepository(db);
   const ordersRepo = createOrdersRepository(db);
   const staffRepo = createStaffRepository(db);
   const vehiclesRepo = createVehiclesRepository(db);
   const sequences = createSequenceRepository(db);
+  const paymentsRepo = createPaymentsRepository(db);
+  const shiftsRepo = createShiftsRepository(db);
+  const discountsRepo = createDiscountsRepository(db);
+  const kotRepo = createKotRepository(db);
+  const tablesRepo = createTablesRepository(db);
 
   await seedDefaultAdmin(users);
   if (allowDemoData) {
@@ -93,14 +130,17 @@ async function bootstrapServices(): Promise<void> {
   }
 
   const auth = createAuthService(users);
+
+  // Created before the order service because orders.create() enforces its rule.
+  const discountsService = createDiscountsService({ discounts: discountsRepo, users });
   authService = auth;
 
   const staffService = createStaffService({
     staff: staffRepo,
     vehicles: vehiclesRepo,
     commissionForMonth: (deliveryBoyId, month) => {
-      const from = `${month}-01`;
-      const to = `${month}-31`;
+      const from = monthStart(month);
+      const to = monthEnd(month);
       return (
         ordersRepo.deliveriesByBoy(from, to).find((row) => row.deliveryBoyId === deliveryBoyId)
           ?.commission ?? 0
@@ -108,24 +148,58 @@ async function bootstrapServices(): Promise<void> {
     },
   });
 
-  const backups = createBackupService(databaseFile(), backupDirectory(), {
-    checkpoint: () => {
-      getDatabase().pragma('wal_checkpoint(TRUNCATE)');
-    },
-    replaceWith: (sourcePath) => {
-      closeDatabase();
-      copyFileSync(sourcePath, databaseFile());
-      // Drop stale WAL/SHM files from the previous database before reopening.
-      for (const suffix of ['-wal', '-shm']) {
+  const backups = createBackupService(
+    databaseFile(),
+    backupDirectory(),
+    {
+      checkpoint: () => {
+        getDatabase().pragma('wal_checkpoint(TRUNCATE)');
+      },
+      /**
+       * A restore swaps the whole database file, so every repository built during
+       * bootstrap would still point at the old, closed handle. Rather than trying to
+       * hot-swap them (fragile), we copy the file and relaunch the app. The candidate
+       * file was already validated by backupService.restore(), so the copy is safe.
+       */
+      replaceWith: (sourcePath) => {
+        closeDatabase();
+
         try {
-          unlinkSync(`${databaseFile()}${suffix}`);
-        } catch {
-          // The file may not exist; that is fine.
+          copyFileSync(sourcePath, databaseFile());
+          // Stale WAL/SHM pages from the replaced database would corrupt the new one.
+          for (const suffix of ['-wal', '-shm']) {
+            try {
+              unlinkSync(`${databaseFile()}${suffix}`);
+            } catch {
+              // The sidecar may not exist; that is fine.
+            }
+          }
+        } catch (error) {
+          logError('Restore copy failed', error);
+          dialog.showErrorBox(
+            'Restore failed',
+            'The backup could not be copied. Your current data is unchanged. Please close the app and try again.',
+          );
+          openDatabase(databaseFile());
+          return;
         }
-      }
-      openDatabase(databaseFile());
+
+        dialog.showMessageBoxSync({
+          type: 'info',
+          title: 'Restore complete',
+          message: 'The backup has been restored.',
+          detail: 'The app will now restart so the restored data can be loaded.',
+          buttons: ['Restart now'],
+        });
+
+        app.relaunch();
+        app.exit(0);
+      },
     },
-  });
+    {
+      supportedSchemaVersion: supportedSchemaVersion(),
+    },
+  );
 
   backupServiceInstance = backups;
 
@@ -135,6 +209,8 @@ async function bootstrapServices(): Promise<void> {
     markPrinted: (orderId) => {
       ordersRepo.markInvoicePrinted(orderId);
     },
+    // Read fresh on every print so a Settings change takes effect immediately.
+    silentPrinting: () => settingsRepo.readShopSettings().printerSilent,
   });
 
   const reportsService = createReportsService({
@@ -161,6 +237,12 @@ async function bootstrapServices(): Promise<void> {
       settings: settingsRepo,
       staff: staffRepo,
       users,
+      // The discount rule is enforced inside create(), so it must be wired in.
+      discounts: discountsService,
+      // Allocates the customer token inside the order transaction.
+      kot: kotRepo,
+      // Seats a dine-in order and enforces one open bill per table.
+      tables: tablesRepo,
     }),
     staff: staffService,
     vehicles: createVehiclesService({ vehicles: vehiclesRepo, staff: staffRepo }),
@@ -170,6 +252,17 @@ async function bootstrapServices(): Promise<void> {
     backups,
     print: printService,
     csv: csvService,
+    payments: createPaymentsService({ payments: paymentsRepo, orders: ordersRepo }),
+    shifts: createShiftsService({ shifts: shiftsRepo, orders: ordersRepo }),
+    discounts: discountsService,
+    kot: createKotService({ kot: kotRepo, print: printService, settings: settingsRepo }),
+    tables: createTablesService({
+      tables: tablesRepo,
+      orders: ordersRepo,
+      payments: paymentsRepo,
+      sequences,
+      settings: settingsRepo,
+    }),
   });
 }
 
@@ -210,12 +303,25 @@ function registerIpcHandlers(): void {
 
     if (result.canceled || !result.filePaths[0]) return { ok: true, data: null };
 
-    const filePath = result.filePaths[0];
-    const extension = path.extname(filePath).slice(1).toLowerCase();
-    const mime = extension === 'jpg' ? 'jpeg' : extension;
-    const base64 = readFileSync(filePath).toString('base64');
+    const logo = logoServiceInstance;
+    if (!logo) {
+      return { ok: false, error: { code: 'INTERNAL_ERROR', message: 'Services are not ready' } };
+    }
 
-    return { ok: true, data: `data:image/${mime};base64,${base64}` };
+    try {
+      // Copy the image into the shop's own folder; settings keeps only the name.
+      const stored = logo.save(result.filePaths[0]);
+      return { ok: true, data: logo.resolve(stored) };
+    } catch (error) {
+      const appError = error as { code?: string; message?: string };
+      return {
+        ok: false,
+        error: {
+          code: appError.code === 'VALIDATION_ERROR' ? 'VALIDATION_ERROR' : 'INTERNAL_ERROR',
+          message: appError.message ?? 'The logo could not be saved',
+        },
+      };
+    }
   });
 }
 
@@ -234,7 +340,10 @@ function createMainWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       // The preload imports the shared channel constants, which needs a real require.
-      sandbox: false,
+      // The renderer is untrusted input in this app: it displays data, it never
+      // runs code from the database. Sandboxing it is free here because the preload
+      // only uses contextBridge + ipcRenderer (no Node APIs).
+      sandbox: true,
     },
   });
 

@@ -11,6 +11,10 @@ export interface UserRow {
   active: number;
   must_change_password: number;
   last_login_at: string | null;
+  /** Failed logins since the last success. Survives a restart (migration 014). */
+  failed_attempts: number;
+  /** ISO timestamp until which the account is locked, or null. */
+  locked_until: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -57,6 +61,22 @@ export function createUserRepository(db: AppDatabase) {
      WHERE id = @id
   `);
   const updateActive = db.prepare('UPDATE users SET active = ?, updated_at = ? WHERE id = ?');
+  // Sets the count rather than incrementing it: the service decides whether an
+  // expired lock should start from zero, and an increment here would fight that.
+  const recordFailure = db.prepare(`
+    UPDATE users
+       SET failed_attempts = @attempts,
+           locked_until = @lockedUntil,
+           updated_at = @now
+     WHERE id = @id
+  `);
+
+  const clearFailures = db.prepare(`
+    UPDATE users
+       SET failed_attempts = 0, locked_until = NULL
+     WHERE id = ?
+  `);
+
   const setLastLogin = db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?');
 
   return {
@@ -128,6 +148,19 @@ export function createUserRepository(db: AppDatabase) {
 
     updateLastLogin(userId: number): void {
       setLastLogin.run(toSqlDateTime(), userId);
+    },
+
+    /**
+     * Stores the failed-login count and any lock in one statement, so the counter
+     * and the lock can never disagree after a crash.
+     */
+    recordFailedLogin(userId: number, attempts: number, lockedUntil: string | null): void {
+      recordFailure.run({ id: userId, attempts, lockedUntil, now: toSqlDateTime() });
+    },
+
+    /** Clears the counter and any lock after a good password. */
+    clearFailedLogins(userId: number): void {
+      clearFailures.run(userId);
     },
   };
 }

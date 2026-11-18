@@ -1,8 +1,16 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Minus, Plus, Search, ShoppingBag, Trash2, X } from 'lucide-react';
-import type { DeliveryBoy, MenuItem, OrderStatus, OrderType, Waiter } from '../../types/api';
-import { ORDER_TYPE_LABELS } from '../../types/labels';
+import { Minus, Plus, Search, ShieldCheck, ShoppingBag, Trash2, X } from 'lucide-react';
+import type {
+  DeliveryBoy,
+  DiscountDecision,
+  MenuItem,
+  OrderStatus,
+  OrderType,
+  PaymentMethod,
+  Waiter,
+} from '../../types/api';
+import { ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS } from '../../types/labels';
 import { errorMessage, getApi, unwrap } from '../../utils/api';
 import { useAsync } from '../../hooks/useAsync';
 import { useSettings } from '../../store/settingsStore';
@@ -15,6 +23,7 @@ import { Select } from '../../components/Select';
 import { PageHeader } from '../../components/PageHeader';
 import { toast } from '../../components/Toast';
 import { Alert } from '../../components/Alert';
+import { ApprovalDialog } from '../../components/ApprovalDialog';
 
 interface CartLine {
   item: MenuItem;
@@ -36,20 +45,35 @@ export function NewOrderPage() {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [orderType, setOrderType] = useState<OrderType>('dine_in');
   const [waiterId, setWaiterId] = useState<string>('');
+  // Dine-in only. Empty means "no table", which the main process allows.
+  const [tableId, setTableId] = useState<string>('');
   const [deliveryBoyId, setDeliveryBoyId] = useState<string>('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [notes, setNotes] = useState('');
   const [discount, setDiscount] = useState(0);
+  // Promo codes and manual discounts are alternatives — a promo code wins.
+  const [promoCode, setPromoCode] = useState('');
+  // The main process decides what a discount means; the UI only displays it.
+  const [decision, setDecision] = useState<DiscountDecision | null>(null);
+  const [approvalId, setApprovalId] = useState<number | null>(null);
+  const [approvalReason, setApprovalReason] = useState('');
+  const [approvalFor, setApprovalFor] = useState(0);
+  const [isApprovalOpen, setIsApprovalOpen] = useState(false);
   const [taxPercent, setTaxPercent] = useState<number | null>(null);
   const [orderStatus, setOrderStatus] = useState<OrderStatus>('pending');
+  // Payment taken at the counter. 'none' saves the order unpaid for later.
+  const [payMethod, setPayMethod] = useState<PaymentMethod>('cash');
+  const [payLater, setPayLater] = useState(false);
+  const [tendered, setTendered] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const categories = useAsync(async () => unwrap(await getApi().menu.listCategories()), []);
   const items = useAsync(async () => unwrap(await getApi().menu.listItems()), []);
   const waiters = useAsync(async () => unwrap(await getApi().staff.listWaiters()), []);
+  const tables = useAsync(async () => unwrap(await getApi().tables.list()), []);
   const riders = useAsync(async () => unwrap(await getApi().staff.listDeliveryBoys()), []);
 
   // The shop's default tax is used until the cashier types their own value.
@@ -65,9 +89,58 @@ export function NewOrderPage() {
   }, [items.data, categoryId, search]);
 
   const subtotal = cart.reduce((total, line) => total + line.item.price * line.qty, 0);
-  const safeDiscount = Math.min(discount, subtotal);
+  // Mirror the main-process rule instead of clamping: the cashier sees the mistake.
+  const discountTooLarge = discount > subtotal;
+  // What the main process last said about this discount. Until it answers, fall
+  // back to the raw figure so the totals do not jump while typing.
+  const safeDiscount = discountTooLarge ? subtotal : (decision?.amount ?? discount);
+  const discountBlocked = (decision?.errors.length ?? 0) > 0;
+  const needsApproval = decision?.needsApproval === true && approvalId === null;
   const tax = Math.round(((subtotal - safeDiscount) * effectiveTaxPercent) / 100);
   const total = subtotal - safeDiscount + tax;
+
+  /**
+   * Asks the main process what the current discount means for this role. Called
+   * after every edit; an approval obtained for an earlier amount is dropped,
+   * because it cannot legally cover a different figure.
+   */
+  const revalidate = async (nextDiscount: number, nextPromo: string) => {
+    setApprovalId(null);
+    setApprovalReason('');
+
+    if (nextDiscount <= 0 && nextPromo.trim() === '') {
+      setDecision(null);
+      return;
+    }
+
+    try {
+      const result = unwrap(
+        await getApi().discounts.validate({
+          subtotal,
+          percentX100: 0,
+          amount: nextDiscount,
+          promoCode: nextPromo,
+        }),
+      );
+      setDecision(result);
+    } catch {
+      // A validation failure must not block the till; the save path reports it.
+      setDecision(null);
+    }
+  };
+
+  const changeDiscount = (paisa: number) => {
+    setDiscount(paisa);
+    void revalidate(paisa, promoCode);
+  };
+
+  const changePromoCode = (code: string) => {
+    setPromoCode(code);
+    void revalidate(discount, code);
+  };
+
+  const change = Math.max(tendered - total, 0);
+  const tenderedTooLow = !payLater && payMethod === 'cash' && tendered > 0 && tendered < total;
 
   const addItem = (item: MenuItem) => {
     if (!item.available) {
@@ -116,6 +189,27 @@ export function NewOrderPage() {
       return;
     }
 
+    if (discountTooLarge) {
+      setError('Discount subtotal se zyada nahi ho sakta.');
+      return;
+    }
+
+    if (discountBlocked) {
+      setError(decision?.errors[0] ?? 'This discount is not allowed.');
+      return;
+    }
+
+    if (needsApproval) {
+      setApprovalFor(safeDiscount);
+      setIsApprovalOpen(true);
+      return;
+    }
+
+    if (tenderedTooLow) {
+      setError('Cash received is less than the total.');
+      return;
+    }
+
     setIsSaving(true);
     try {
       const created = unwrap(
@@ -126,15 +220,51 @@ export function NewOrderPage() {
           customerPhone,
           customerAddress,
           waiterId: waiterId ? Number(waiterId) : null,
+          tableId: orderType === 'dine_in' && tableId ? Number(tableId) : null,
           deliveryBoyId: deliveryBoyId ? Number(deliveryBoyId) : null,
-          discount,
+          discount: safeDiscount,
+          promoCode,
+          approvedBy: approvalId,
+          discountReason: approvalReason,
           taxPercent: effectiveTaxPercent,
           notes,
           items: cart.map((line) => ({ itemId: line.item.id, qty: line.qty, notes: '' })),
         }),
       );
 
-      toast.success(`Order ${created.orderNo} saved`);
+      // Take the money only after the order exists. A failed payment must not lose
+      // the order, so it is reported separately and the invoice screen can retry.
+      if (!payLater) {
+        try {
+          unwrap(
+            await getApi().payments.addPayment({
+              orderId: created.id,
+              method: payMethod,
+              amount: payMethod === 'credit' ? total : total,
+              tendered: payMethod === 'cash' ? tendered || total : null,
+              changeDue: payMethod === 'cash' ? Math.max((tendered || total) - total, 0) : null,
+              reference: '',
+            }),
+          );
+        } catch (paymentError) {
+          toast.error(errorMessage(paymentError, 'The payment could not be recorded'));
+        }
+      }
+
+      // The kitchen slip goes out as soon as the order exists. A failure here must
+      // not lose the order — it is already saved and paid — so it is reported and
+      // the invoice screen can reprint it.
+      try {
+        await getApi().kot.print(created.id);
+      } catch (kotError) {
+        toast.error(errorMessage(kotError, 'The kitchen ticket could not be printed'));
+      }
+
+      toast.success(
+        created.tokenNo !== null
+          ? `Order ${created.orderNo} saved · Token ${created.tokenNo}`
+          : `Order ${created.orderNo} saved`,
+      );
       navigate(`/invoice/${created.id}`, { state: { autoPrint: thenPrint } });
     } catch (saveError) {
       setError(errorMessage(saveError, 'The order could not be saved'));
@@ -144,6 +274,19 @@ export function NewOrderPage() {
 
   return (
     <div>
+      <ApprovalDialog
+        isOpen={isApprovalOpen}
+        amount={approvalFor}
+        percentX100={subtotal > 0 ? Math.round((approvalFor / subtotal) * 10_000) : 0}
+        onClose={() => setIsApprovalOpen(false)}
+        onApproved={(id, reason) => {
+          setApprovalId(id);
+          setApprovalReason(reason);
+          setIsApprovalOpen(false);
+          toast.success('Discount approved');
+        }}
+      />
+
       <PageHeader
         title="New order"
         subtitle="Pick items, choose the order type, then save and print."
@@ -268,6 +411,24 @@ export function NewOrderPage() {
             </div>
 
             <div className="flex flex-col gap-3">
+              {orderType === 'dine_in' && (
+                <Select
+                  label="Table"
+                  placeholder="No table"
+                  hint="Only free tables are listed. Leave empty for a counter order."
+                  options={(tables.data ?? [])
+                    .filter((table) => table.active && table.orderId === null)
+                    .map((table) => ({
+                      value: String(table.id),
+                      label: `${table.name} · ${table.seats} seats${
+                        table.area ? ` · ${table.area}` : ''
+                      }`,
+                    }))}
+                  value={tableId}
+                  onChange={(event) => setTableId(event.target.value)}
+                />
+              )}
+
               {orderType === 'dine_in' && (
                 <Select
                   label="Waiter"
@@ -397,7 +558,7 @@ export function NewOrderPage() {
             )}
 
             <div className="mt-3 grid grid-cols-2 gap-3 border-t border-border pt-3">
-              <MoneyInput label="Discount" value={discount} onChange={setDiscount} />
+              <MoneyInput label="Discount" value={discount} onChange={changeDiscount} />
               <Input
                 label="Tax %"
                 type="number"
@@ -409,6 +570,15 @@ export function NewOrderPage() {
                 }
               />
             </div>
+
+            <Input
+              label="Promo code"
+              value={promoCode}
+              placeholder="EID15"
+              className="mt-3"
+              onChange={(event) => changePromoCode(event.target.value.toUpperCase())}
+              hint="A promo code replaces the manual discount above."
+            />
 
             <Input
               label="Order note"
@@ -442,6 +612,102 @@ export function NewOrderPage() {
                 </dd>
               </div>
             </dl>
+
+            {discountTooLarge && (
+              <div className="mt-3">
+                <Alert tone="error">Discount subtotal se zyada nahi ho sakta.</Alert>
+              </div>
+            )}
+
+            {!discountTooLarge && discountBlocked && (
+              <div className="mt-3">
+                <Alert tone="error">{decision?.errors[0] ?? 'This discount is not allowed.'}</Alert>
+              </div>
+            )}
+
+            {needsApproval && (
+              <div className="mt-3 flex flex-col gap-2">
+                <Alert tone="warning">
+                  This discount needs a manager&apos;s approval before the order can be saved.
+                </Alert>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setApprovalFor(safeDiscount);
+                    setIsApprovalOpen(true);
+                  }}
+                >
+                  <ShieldCheck aria-hidden className="h-4 w-4" />
+                  Ask a manager to approve
+                </Button>
+              </div>
+            )}
+
+            {approvalId !== null && (
+              <div className="mt-3">
+                <Alert tone="success">Approved. Save the order to apply it.</Alert>
+              </div>
+            )}
+
+            {/* -------------------------- Payment -------------------------- */}
+            <div className="mt-4 rounded-control border border-border bg-background/60 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-button">Payment</span>
+                <label className="flex items-center gap-2 text-caption text-text-secondary">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={payLater}
+                    onChange={(event) => setPayLater(event.target.checked)}
+                  />
+                  Pay later (unpaid)
+                </label>
+              </div>
+
+              {!payLater && (
+                <>
+                  <Select
+                    label="Method"
+                    value={payMethod}
+                    onChange={(event) => {
+                      setPayMethod(event.target.value as PaymentMethod);
+                      setTendered(0);
+                    }}
+                    options={(Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[]).map(
+                      (value) => ({ value, label: PAYMENT_METHOD_LABELS[value] }),
+                    )}
+                  />
+
+                  {payMethod === 'cash' && (
+                    <div className="mt-2">
+                      <MoneyInput
+                        label="Cash received"
+                        value={tendered}
+                        onChange={setTendered}
+                        hint="Leave at 0 to take the exact total"
+                      />
+                      {change > 0 && (
+                        <p className="mt-1 text-caption text-text-secondary">
+                          Change due: <span className="font-medium">{formatAmount(change)}</span>
+                        </p>
+                      )}
+                      {tenderedTooLow && (
+                        <p className="mt-1 text-caption text-status-cancelled">
+                          Cash received is less than the total.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {payMethod === 'credit' && (
+                    <p className="mt-2 text-caption text-text-secondary">
+                      The full amount will be added to this customer&apos;s udhaar. A phone number
+                      is required.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
 
             {error && (
               <div className="mt-3">

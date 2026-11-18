@@ -53,15 +53,42 @@ const repos = {
   staff: load('db/repositories/staffRepository.js').createStaffRepository(db),
   vehicles: load('db/repositories/vehiclesRepository.js').createVehiclesRepository(db),
   sequences: load('db/repositories/sequenceRepository.js').createSequenceRepository(db),
+  payments: load('db/repositories/paymentsRepository.js').createPaymentsRepository(db),
+  shifts: load('db/repositories/shiftsRepository.js').createShiftsRepository(db),
+  discounts: load('db/repositories/discountsRepository.js').createDiscountsRepository(db),
+  kot: load('db/repositories/kotRepository.js').createKotRepository(db),
+  tables: load('db/repositories/tablesRepository.js').createTablesRepository(db),
+};
+
+// Printing needs a real window. The preview throws so the UI reports it honestly,
+// but the HTML builders are the real ones, so the screen shows the actual ticket.
+const printStub = {
+  printInvoice: async () => {
+    throw new Error('Printing is not available in the browser preview');
+  },
+  savePdf: async () => null,
+  printShiftReport: async () => {
+    throw new Error('Printing is not available in the browser preview');
+  },
+  printKot: async () => {
+    throw new Error('Printing is not available in the browser preview');
+  },
+  silentPrinting: () => false,
+  renderHtml: load('services/printService.js').renderInvoiceHtml,
+  renderKotHtml: load('services/printService.js').renderKotHtml,
 };
 
 const auth = load('services/authService.js').createAuthService(repos.users);
+const discountsService = load('services/discountsService.js').createDiscountsService({
+  discounts: repos.discounts,
+  users: repos.users,
+});
 const staffService = load('services/staffService.js').createStaffService({
   staff: repos.staff,
   vehicles: repos.vehicles,
   commissionForMonth: (deliveryBoyId, month) =>
     repos.orders
-      .deliveriesByBoy(`${month}-01`, `${month}-31`)
+      .deliveriesByBoy(`${month}-01`, `${monthEnd(month)}`)
       .find((row) => row.deliveryBoyId === deliveryBoyId)?.commission ?? 0,
 });
 const reportsService = load('services/reportsService.js').createReportsService({
@@ -82,6 +109,10 @@ const registry = buildRegistry({
     settings: repos.settings,
     staff: repos.staff,
     users: repos.users,
+    discounts: discountsService,
+    kot: repos.kot,
+    tables: repos.tables,
+    payments: repos.payments,
   }),
   staff: staffService,
   vehicles: load('services/vehiclesService.js').createVehiclesService({
@@ -99,17 +130,32 @@ const registry = buildRegistry({
       replaceWith: () => undefined,
     },
   ),
-  print: {
-    printInvoice: async () => {
-      throw new Error('Printing is not available in the browser preview');
-    },
-    savePdf: async () => null,
-    renderHtml: load('services/printService.js').renderInvoiceHtml,
-  },
+  print: printStub,
   csv: load('services/csvService.js').createCsvService({
     reports: reportsService,
     exportDirectory: () => tempDir,
     salarySummary: (month) => reportsService.salarySummary(month),
+  }),
+  payments: load('services/paymentsService.js').createPaymentsService({
+    payments: repos.payments,
+    orders: repos.orders,
+  }),
+  shifts: load('services/shiftsService.js').createShiftsService({
+    shifts: repos.shifts,
+    orders: repos.orders,
+  }),
+  discounts: discountsService,
+  kot: load('services/kotService.js').createKotService({
+    kot: repos.kot,
+    print: printStub,
+    settings: repos.settings,
+  }),
+  tables: load('services/tablesService.js').createTablesService({
+    tables: repos.tables,
+    orders: repos.orders,
+    payments: repos.payments,
+    sequences: repos.sequences,
+    settings: repos.settings,
   }),
 });
 

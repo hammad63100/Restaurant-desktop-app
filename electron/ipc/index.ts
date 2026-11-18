@@ -9,6 +9,11 @@ import type { UserService } from '../services/userService';
 import type { BackupService } from '../services/backupService';
 import type { PrintService } from '../services/printService';
 import type { CsvService } from '../services/csvService';
+import type { PaymentsService } from '../services/paymentsService';
+import type { ShiftsService } from '../services/shiftsService';
+import type { DiscountsService } from '../services/discountsService';
+import type { KotService } from '../services/kotService';
+import type { TablesService } from '../services/tablesService';
 import { authHandlers } from './auth.ipc';
 import { menuHandlers } from './menu.ipc';
 import { ordersHandlers } from './orders.ipc';
@@ -17,6 +22,11 @@ import { vehiclesHandlers } from './vehicles.ipc';
 import { reportsHandlers } from './reports.ipc';
 import { settingsHandlers } from './settings.ipc';
 import { usersHandlers } from './users.ipc';
+import { paymentsHandlers } from './payments.ipc';
+import { shiftsHandlers } from './shifts.ipc';
+import { discountsHandlers } from './discounts.ipc';
+import { kotHandlers } from './kot.ipc';
+import { tablesHandlers } from './tables.ipc';
 import type { HandlerRegistry } from './registry';
 
 export interface IpcServices {
@@ -31,6 +41,11 @@ export interface IpcServices {
   backups: BackupService;
   print: PrintService;
   csv: CsvService;
+  payments: PaymentsService;
+  shifts: ShiftsService;
+  discounts: DiscountsService;
+  kot: KotService;
+  tables: TablesService;
 }
 
 /**
@@ -48,6 +63,11 @@ export function buildRegistry(services: IpcServices): HandlerRegistry {
     ...reportsHandlers(services.reports, services.csv),
     ...settingsHandlers(services.settings, services.backups),
     ...usersHandlers(services.users),
+    ...paymentsHandlers(services.payments),
+    ...shiftsHandlers(services.shifts, services.print),
+    ...discountsHandlers(services.discounts),
+    ...kotHandlers(services.kot),
+    ...tablesHandlers(services.tables),
   };
 }
 

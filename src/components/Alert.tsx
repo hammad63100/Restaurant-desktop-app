@@ -1,7 +1,7 @@
-import { AlertCircle, CheckCircle2, Info } from 'lucide-react';
+import { AlertCircle, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
 import { cn } from '../utils/cn';
 
-type AlertTone = 'error' | 'success' | 'info';
+type AlertTone = 'error' | 'success' | 'info' | 'warning';
 
 interface AlertProps {
   tone?: AlertTone;
@@ -18,6 +18,10 @@ const TONE_STYLES: Record<AlertTone, { box: string; Icon: typeof AlertCircle }> 
     Icon: CheckCircle2,
   },
   info: { box: 'border-border bg-background text-text-secondary', Icon: Info },
+  warning: {
+    box: 'border-secondary/40 bg-secondary/10 text-[#8a5b00]',
+    Icon: AlertTriangle,
+  },
 };
 
 /** Inline message box. Icons plus text, so colour is never the only signal. */

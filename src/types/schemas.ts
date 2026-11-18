@@ -92,7 +92,12 @@ export const newOrderSchema = z
     customerAddress: optionalText(200, 'Address'),
     waiterId: z.number().int().positive().nullable().default(null),
     deliveryBoyId: z.number().int().positive().nullable().default(null),
+    // Dine-in only; ignored for takeaway and delivery (enforced in the service).
+    tableId: z.number(message).int().positive().nullable().default(null),
     discount: paisaField.default(0),
+    discountReason: optionalText(200, 'Discount reason'),
+    promoCode: optionalText(30, 'Promo code'),
+    approvedBy: z.number(message).int().positive().nullable().default(null),
     taxPercent: z.number(message).int().min(0, 'Tax cannot be negative').max(100).default(0),
     notes: optionalText(300, 'Notes'),
     items: z
@@ -116,6 +121,12 @@ export const newOrderSchema = z
   .refine((values) => values.type !== 'delivery' || values.customerAddress.trim() !== '', {
     message: 'Delivery address is required',
     path: ['customerAddress'],
+  })
+  // The subtotal depends on the menu prices, so this is checked again in
+  // ordersService.create; here it catches the obvious case in the form.
+  .refine((values) => values.discount >= 0, {
+    message: 'Discount cannot be negative',
+    path: ['discount'],
   });
 
 export const orderFilterSchema = z.object({
@@ -125,6 +136,13 @@ export const orderFilterSchema = z.object({
   fromDate: z.string(message).max(10).default(''),
   toDate: z.string(message).max(10).default(''),
   limit: z.number(message).int().min(1).max(500).default(100),
+  after: z
+    .object({
+      createdAt: z.string(message).trim().min(1),
+      id: z.number(message).int().positive(),
+    })
+    .nullable()
+    .default(null),
 });
 
 export const orderStatusUpdateSchema = z.object({
@@ -257,6 +275,7 @@ export const shopSettingsSchema = z.object({
     .max(100, 'Tax cannot exceed 100%'),
   receiptWidth: z.enum(['80mm', 'a4']).default('80mm'),
   backupOnClose: z.boolean(message).default(true),
+  printerSilent: z.boolean(message).default(true),
 });
 
 /* -------------------------------- Users -------------------------------- */
@@ -297,3 +316,219 @@ export type ChangePasswordPayload = z.infer<typeof changePasswordSchema>;
 export function firstIssueMessage(error: z.ZodError): string {
   return error.issues[0]?.message ?? 'The submitted data is not valid';
 }
+
+/* ------------------------------------------------------------------ *
+ * Payments (Phase 2, feature 3.A)
+ * ------------------------------------------------------------------ */
+
+export const paymentMethodSchema = z.enum([
+  'cash',
+  'card',
+  'jazzcash',
+  'easypaisa',
+  'bank_transfer',
+  'credit',
+]);
+
+/**
+ * Cash is the only method that takes more money than owed (and gives change), so
+ * `tendered`/`changeDue` are validated against the amount and rejected elsewhere.
+ */
+export const paymentSchema = z
+  .object({
+    orderId: idField,
+    method: paymentMethodSchema,
+    amount: paisaField.refine((value) => value > 0, {
+      message: 'Payment must be more than zero',
+    }),
+    tendered: paisaField.nullable().default(null),
+    changeDue: paisaField.nullable().default(null),
+    reference: optionalText(80, 'Reference'),
+  })
+  .refine((values) => values.method === 'cash' || values.tendered === null, {
+    message: 'Only a cash payment can record cash tendered',
+    path: ['tendered'],
+  })
+  .refine((values) => values.method === 'cash' || values.changeDue === null, {
+    message: 'Only a cash payment can give change',
+    path: ['changeDue'],
+  })
+  .refine((values) => values.tendered === null || values.tendered >= values.amount, {
+    message: 'Cash tendered cannot be less than the amount',
+    path: ['tendered'],
+  })
+  .refine(
+    (values) =>
+      values.tendered === null ||
+      values.changeDue === null ||
+      values.changeDue === values.tendered - values.amount,
+    {
+      message: 'Change must equal the cash tendered minus the amount',
+      path: ['changeDue'],
+    },
+  );
+
+export const paymentVoidSchema = z.object({
+  id: idField,
+  reason: z.string(message).trim().min(3, 'Give a reason for voiding this payment').max(200),
+});
+
+export const udhaarSettleSchema = z.object({
+  customerId: idField,
+  method: paymentMethodSchema.refine((method) => method !== 'credit', {
+    message: 'Choose how the customer paid',
+  }),
+  amount: paisaField.refine((value) => value > 0, { message: 'Amount must be more than zero' }),
+  reference: optionalText(80, 'Reference'),
+  orderId: idField.nullable().default(null),
+});
+
+export const ledgerQuerySchema = z.object({ customerId: idField });
+
+/** CSV export names that map to the udhaar page. */
+export const UDHAAR_EXPORT = 'udhaar' as const;
+
+/* ------------------------------------------------------------------ *
+ * Shifts / day close (Phase 2, feature 3.B)
+ * ------------------------------------------------------------------ */
+
+export const cashMovementSchema = z.object({
+  kind: z.enum(['cash_in', 'cash_out', 'refund', 'expense']),
+  amount: paisaField.refine((value) => value > 0, { message: 'Amount must be more than zero' }),
+  reason: z.string(message).trim().min(3, 'Give a reason for this cash movement').max(200),
+});
+
+export const shiftOpenSchema = z.object({ openingCash: paisaField });
+
+export const shiftCloseSchema = z.object({
+  countedCash: paisaField,
+  notes: optionalText(300, 'Notes'),
+});
+
+export const shiftIdSchema = z.object({ shiftId: idField });
+export const shiftReportSchema = z.object({ shiftId: idField.optional() });
+export const shiftListSchema = z.object({
+  limit: z.number(message).int().min(1).max(200).default(20),
+});
+export const shiftPrintSchema = z.object({ shiftId: idField, paper: z.enum(['80mm', 'a4']) });
+
+/* ------------------------------------------------------------------ *
+ * Discount rules and approvals (Phase 2, feature 3.C)
+ * ------------------------------------------------------------------ */
+
+export const discountRuleSchema = z.object({
+  id: z.number(message).int().positive(),
+  role: z.enum(['cashier', 'manager', 'admin']),
+  maxPercentX100: z.number(message).int().min(0).max(10_000),
+  maxAmount: paisaField.nullable().default(null),
+  requiresApprovalAbovePercentX100: z.number(message).int().min(0).max(10_000).default(0),
+  active: z.boolean().default(true),
+});
+
+export const discountValidateSchema = z.object({
+  subtotal: paisaField,
+  percentX100: z.number(message).int().min(0).max(10_000).default(0),
+  amount: paisaField.default(0),
+  promoCode: optionalText(30, 'Promo code'),
+});
+
+export const discountApproveSchema = z.object({
+  orderId: idField.nullable().default(null),
+  percentX100: z.number(message).int().min(0).max(10_000).default(0),
+  amount: paisaField,
+  reason: z.string(message).trim().min(3, 'Give a reason for this discount').max(200),
+  username: z.string(message).trim().min(1, 'Manager username is required'),
+  password: z.string(message).min(1, 'Manager password is required'),
+});
+
+export const promoSchema = z
+  .object({
+    id: z.number(message).int().positive().optional(),
+    code: z
+      .string(message)
+      .trim()
+      .min(2, 'The code needs at least 2 characters')
+      .max(20, 'The code is too long')
+      .regex(/^[A-Za-z0-9_-]+$/, 'Use letters and numbers only'),
+    kind: z.enum(['percent', 'fixed']),
+    value: z.number(message).int().min(1, 'The value must be more than zero'),
+    minOrder: paisaField.default(0),
+    validFrom: z.string(message).trim().nullable().default(null),
+    validTo: z.string(message).trim().nullable().default(null),
+    maxUses: z.number(message).int().positive().nullable().default(null),
+    active: z.boolean().default(true),
+  })
+  .refine((values) => values.kind !== 'percent' || values.value <= 10_000, {
+    message: 'A promo percentage cannot exceed 100%',
+    path: ['value'],
+  });
+
+/** Kitchen ticket lookup and print, both addressed by order id. */
+export const kotPrintSchema = z.object({
+  orderId: idField,
+});
+
+/* --------------------- tables, merge and split (Phase 3) --------------------- */
+
+export const tableSchema = z.object({
+  id: z.number(message).int().positive().optional(),
+  name: z
+    .string(message)
+    .trim()
+    .min(1, 'Give the table a name')
+    .max(12, 'Keep the table name short')
+    .regex(/^[A-Za-z0-9 -]+$/, 'Use letters and numbers only'),
+  seats: z.number(message).int().min(1, 'A table needs at least one seat').max(40),
+  area: optionalText(40, 'Area'),
+  active: z.boolean().default(true),
+});
+
+export const tableDeleteSchema = z.object({ id: idField });
+
+export const mergeSchema = z
+  .object({
+    sourceId: idField,
+    targetId: idField,
+  })
+  .refine((values) => values.sourceId !== values.targetId, {
+    message: 'Choose two different bills',
+    path: ['targetId'],
+  });
+
+export const splitSchema = z
+  .object({
+    orderId: idField,
+    itemIds: z.array(idField).min(1, 'Choose at least one line to move').max(100),
+    /** Send the moved lines to a new table (true) or leave the new bill unseated. */
+    moveTable: z.boolean().default(false),
+  })
+  // Duplicated ids would move the same line twice.
+  .refine((values) => new Set(values.itemIds).size === values.itemIds.length, {
+    message: 'The same line was selected twice',
+    path: ['itemIds'],
+  });
+
+export const amendOrderSchema = z.object({
+  id: idField,
+  reason: z
+    .string(message)
+    .trim()
+    .min(3, 'Say why the bill is being changed')
+    .max(200, 'Keep the reason short'),
+  items: z
+    .array(
+      z.object({
+        itemId: idField,
+        qty: z.number(message).int().min(1, 'Quantity must be at least 1').max(999),
+        notes: optionalText(120, 'Item note'),
+      }),
+    )
+    .min(1, 'A bill needs at least one line. Cancel it instead.'),
+  discount: paisaField.default(0),
+  approvedBy: z.number(message).int().positive().nullable().default(null),
+  customerName: optionalText(80, 'Customer name'),
+  customerPhone: optionalText(20, 'Phone'),
+  customerAddress: optionalText(200, 'Address'),
+  waiterId: z.number(message).int().positive().nullable().default(null),
+  notes: optionalText(300, 'Notes'),
+});

@@ -38,6 +38,50 @@ const api: RendererApi = {
     markPrinted: (id) => invoke(CHANNELS.orderMarkPrinted, { id }),
     print: (id, paper) => invoke(CHANNELS.orderPrint, { id, paper }),
     savePdf: (id, paper) => invoke(CHANNELS.orderPdf, { id, paper }),
+    amend: (input) => invoke(CHANNELS.orderAmend, input),
+    amendments: (id) => invoke(CHANNELS.orderAmendments, { id }),
+  },
+
+  payments: {
+    addPayment: (input) => invoke(CHANNELS.paymentAdd, input),
+    voidPayment: (id, reason) => invoke(CHANNELS.paymentVoid, { id, reason }),
+    listByOrder: (orderId) => invoke(CHANNELS.paymentListByOrder, { orderId }),
+    udhaarList: () => invoke(CHANNELS.udhaarList, {}),
+    udhaarLedger: (customerId) => invoke(CHANNELS.udhaarLedger, { customerId }),
+    settleUdhaar: (input) => invoke(CHANNELS.udhaarSettle, input),
+  },
+
+  shifts: {
+    current: () => invoke(CHANNELS.shiftCurrent, {}),
+    open: (openingCash) => invoke(CHANNELS.shiftOpen, { openingCash }),
+    close: (input) => invoke(CHANNELS.shiftClose, input),
+    report: (shiftId) => invoke(CHANNELS.shiftReport, shiftId === undefined ? {} : { shiftId }),
+    list: (limit = 20) => invoke(CHANNELS.shiftList, { limit }),
+    addCashMovement: (input) => invoke(CHANNELS.shiftCashMovement, input),
+    print: (shiftId, paper) => invoke(CHANNELS.shiftPrint, { shiftId, paper }),
+  },
+
+  discounts: {
+    rules: () => invoke(CHANNELS.discountRules, {}),
+    saveRule: (input) => invoke(CHANNELS.discountSaveRule, input),
+    validate: (input) => invoke(CHANNELS.discountValidate, input),
+    approve: (input) => invoke(CHANNELS.discountApprove, input),
+    listPromos: () => invoke(CHANNELS.promoList, {}),
+    savePromo: (input) => invoke(CHANNELS.promoSave, input),
+    deletePromo: (id) => invoke(CHANNELS.promoDelete, { id }),
+  },
+
+  tables: {
+    list: () => invoke(CHANNELS.tablesList, {}),
+    save: (input) => invoke(CHANNELS.tableSave, input),
+    remove: (id) => invoke(CHANNELS.tableDelete, { id }),
+    merge: (input) => invoke(CHANNELS.orderMerge, input),
+    split: (input) => invoke(CHANNELS.orderSplit, input),
+  },
+
+  kot: {
+    ticket: (orderId) => invoke(CHANNELS.kotTicket, { orderId }),
+    print: (orderId) => invoke(CHANNELS.kotPrint, { orderId }),
   },
 
   staff: {

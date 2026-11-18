@@ -1,4 +1,6 @@
 import type {
+  PaymentMethod,
+  PaymentStatus,
   AttendanceStatus,
   OrderStatus,
   OrderType,
@@ -20,6 +22,30 @@ export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
   dine_in: 'Dine-in',
   takeaway: 'Takeaway',
   delivery: 'Delivery',
+};
+
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  cash: 'Cash',
+  card: 'Card',
+  jazzcash: 'JazzCash',
+  easypaisa: 'Easypaisa',
+  bank_transfer: 'Bank transfer',
+  credit: 'Udhaar (pay later)',
+};
+
+export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
+  unpaid: 'Unpaid',
+  partial: 'Part paid',
+  paid: 'Paid',
+  refunded: 'Refunded',
+};
+
+/** Badge colour per payment status, so Orders can show it at a glance. */
+export const PAYMENT_STATUS_CLASSES: Record<PaymentStatus, string> = {
+  unpaid: 'bg-status-cancelled/10 text-status-cancelled',
+  partial: 'bg-secondary/15 text-[#8a5b00]',
+  paid: 'bg-status-delivered/10 text-status-delivered',
+  refunded: 'bg-status-preparing/10 text-status-preparing',
 };
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
