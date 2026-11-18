@@ -10,6 +10,7 @@ import {
   formatAmount,
   formatDate,
   formatMonth,
+  monthEndIso,
   monthStartIso,
   todayIso,
 } from '../../utils/format';
@@ -99,7 +100,9 @@ export function ReportsPage() {
       const result = unwrap(
         await getApi().reports.exportCsv(
           config.exportName,
-          tab === 'salary' ? { fromDate: `${salaryMonth}-01`, toDate: `${salaryMonth}-31` } : range,
+          tab === 'salary'
+            ? { fromDate: monthStartIso(salaryMonth), toDate: monthEndIso(salaryMonth) }
+            : range,
         ),
       );
 

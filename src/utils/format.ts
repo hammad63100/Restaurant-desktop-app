@@ -84,6 +84,18 @@ export function monthStartIso(month = currentMonth()): string {
   return `${month}-01`;
 }
 
+/**
+ * Last day of the month as `YYYY-MM-DD`. Computed, not assumed to be 31, so
+ * February and 30-day months are correct.
+ */
+export function monthEndIso(month = currentMonth()): string {
+  const [yearText, monthText] = month.split('-');
+  const year = Number(yearText);
+  const monthIndex = Number(monthText);
+  const lastDay = new Date(year, monthIndex, 0).getDate();
+  return `${month}-${String(lastDay).padStart(2, '0')}`;
+}
+
 export function initials(name: string): string {
   return name
     .split(/\s+/)

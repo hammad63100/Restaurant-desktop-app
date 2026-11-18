@@ -1,5 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
+import Database from 'better-sqlite3';
 import type { BackupFile } from '../../src/types/api';
 import { AppError } from '../utils/errors';
 import { logError, logInfo } from './logger';
@@ -13,15 +14,31 @@ const KEEP_MANUAL_AND_AUTO = 7;
 export interface BackupWriter {
   /** Flushes WAL pages into the main file before the file is copied. */
   checkpoint(): void;
-  /** Replaces the live database with the given backup copy. */
+  /**
+   * Replaces the live database with the given backup copy. Runs in the main
+   * process, which closes the database, copies the file, removes the stale WAL
+   * sidecars and relaunches the app (repositories cannot be hot-swapped safely).
+   */
   replaceWith(sourcePath: string): void;
+}
+
+/** Runtime dependencies that Electron cannot provide inside the test harness. */
+export interface BackupServiceOptions {
+  /**
+   * Highest migration version this build can read. Derived from the shipped
+   * migration files by the caller, so adding a migration cannot be forgotten here.
+   */
+  supportedSchemaVersion?: number;
 }
 
 export function createBackupService(
   databaseFile: string,
   backupDirectory: string,
   writer: BackupWriter,
+  options: BackupServiceOptions = {},
 ) {
+  const supportedSchemaVersion = options.supportedSchemaVersion ?? 7;
+
   function ensureDirectory(): void {
     mkdirSync(backupDirectory, { recursive: true });
   }
@@ -95,13 +112,71 @@ export function createBackupService(
       }
     },
 
-    restore(filePath: string): void {
+    /**
+     * Checks a candidate file BEFORE the live database is touched, so a corrupt or
+     * foreign file can never leave the shop with an unreadable database.
+     */
+    validateBackupFile(filePath: string): void {
       if (!existsSync(filePath)) {
         throw new AppError('NOT_FOUND', 'That backup file no longer exists');
+      }
+
+      const stats = statSync(filePath);
+      if (!stats.isFile()) {
+        throw new AppError('VALIDATION_ERROR', 'Choose a backup file created by this app');
       }
       if (path.extname(filePath).toLowerCase() !== '.db') {
         throw new AppError('VALIDATION_ERROR', 'Choose a backup file created by this app');
       }
+      if (stats.size === 0) {
+        throw new AppError('VALIDATION_ERROR', 'That backup file is empty');
+      }
+
+      let candidate: Database.Database | null = null;
+      try {
+        // Read-only: never creates a missing file and never writes to the candidate.
+        candidate = new Database(filePath, { readonly: true, fileMustExist: true });
+
+        const integrity = candidate.pragma('integrity_check', { simple: true });
+        if (integrity !== 'ok') {
+          throw new AppError('VALIDATION_ERROR', 'That backup file is damaged');
+        }
+
+        const tables = candidate
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+          .all()
+          .map((row) => (row as { name: string }).name);
+
+        if (!tables.includes('schema_migrations') || !tables.includes('orders')) {
+          throw new AppError('VALIDATION_ERROR', 'That file is not a Gul Khan Fast Food backup');
+        }
+
+        const highest = candidate
+          .prepare('SELECT MAX(version) AS version FROM schema_migrations')
+          .get() as { version: number | null } | undefined;
+        const version = highest?.version ?? 0;
+
+        if (version > supportedSchemaVersion) {
+          throw new AppError(
+            'VALIDATION_ERROR',
+            'That backup comes from a newer version of the app. Update the app first.',
+          );
+        }
+      } catch (error) {
+        if (error instanceof AppError) throw error;
+        // better-sqlite3 throws for a file that is not a database at all.
+        throw new AppError('VALIDATION_ERROR', 'That file is not a readable database');
+      } finally {
+        try {
+          candidate?.close();
+        } catch {
+          // Closing a read-only handle cannot fail in a way the shop cares about.
+        }
+      }
+    },
+
+    restore(filePath: string): void {
+      this.validateBackupFile(filePath);
 
       // Keep a safety copy of the current data before overwriting it.
       this.createBackup('auto');

@@ -1,4 +1,5 @@
 import type { AppDatabase } from '../connection';
+import { AppError } from '../../utils/errors';
 import type {
   OrderDetail,
   OrderFilter,
@@ -15,11 +16,17 @@ interface OrderRow {
   invoice_no: string | null;
   type: OrderType;
   status: OrderStatus;
+  token_no: number | null;
+  amendment_count: number;
+  merged_into_order_id: number | null;
+  split_from_order_id: number | null;
+  table_id: number | null;
   customer_name: string;
   customer_phone: string;
   customer_address: string;
   waiter_id: number | null;
   delivery_boy_id: number | null;
+  approved_by: number | null;
   waiter_name: string | null;
   delivery_boy_name: string | null;
   subtotal: number;
@@ -27,6 +34,8 @@ interface OrderRow {
   tax_percent: number;
   tax: number;
   total: number;
+  paid_amount: number;
+  payment_status: OrderSummary['paymentStatus'];
   notes: string;
   created_at: string;
   created_by_name: string;
@@ -44,12 +53,14 @@ interface OrderItemRow {
 }
 
 const ORDER_SELECT = `
-  SELECT o.id, o.order_no, i.invoice_no, o.type, o.status,
+  SELECT o.id, o.order_no, i.invoice_no, o.type, o.status, o.token_no, o.amendment_count,
+         o.merged_into_order_id, o.split_from_order_id, o.table_id, o.approved_by,
          o.customer_name, o.customer_phone, o.customer_address,
          o.waiter_id, o.delivery_boy_id,
          w.name AS waiter_name,
          d.name AS delivery_boy_name,
          o.subtotal, o.discount, o.tax_percent, o.tax, o.total, o.notes,
+         o.paid_amount, o.payment_status,
          o.created_at, u.full_name AS created_by_name, i.printed_at
     FROM orders o
     LEFT JOIN invoices i ON i.order_id = o.id
@@ -64,12 +75,19 @@ const toSummary = (row: OrderRow): OrderSummary => ({
   invoiceNo: row.invoice_no,
   type: row.type,
   status: row.status,
+  tokenNo: row.token_no,
+  amendmentCount: row.amendment_count,
+  mergedIntoOrderId: row.merged_into_order_id,
+  splitFromOrderId: row.split_from_order_id,
+  tableId: row.table_id,
   customerName: row.customer_name,
   customerPhone: row.customer_phone,
   subtotal: row.subtotal,
   discount: row.discount,
   tax: row.tax,
   total: row.total,
+  paidAmount: row.paid_amount,
+  paymentStatus: row.payment_status,
   createdAt: row.created_at,
   createdByName: row.created_by_name,
   waiterName: row.waiter_name,
@@ -91,6 +109,7 @@ const toDetail = (row: OrderRow, items: OrderItemRecord[]): OrderDetail => ({
   customerAddress: row.customer_address,
   waiterId: row.waiter_id,
   deliveryBoyId: row.delivery_boy_id,
+  approvedBy: row.approved_by,
   taxPercent: row.tax_percent,
   notes: row.notes,
   printedAt: row.printed_at,
@@ -102,11 +121,13 @@ export function createOrdersRepository(db: AppDatabase) {
     INSERT INTO orders (
       order_no, type, customer_id, customer_name, customer_phone, customer_address,
       waiter_id, delivery_boy_id, status, subtotal, discount, tax_percent, tax, total,
-      notes, created_by, created_at, updated_at
+      notes, created_by, created_at, updated_at,
+      discount_reason, promo_code, approved_by, token_no, table_id
     ) VALUES (
       @orderNo, @type, @customerId, @customerName, @customerPhone, @customerAddress,
       @waiterId, @deliveryBoyId, @status, @subtotal, @discount, @taxPercent, @tax, @total,
-      @notes, @createdBy, @now, @now
+      @notes, @createdBy, @now, @now,
+      @discountReason, @promoCode, @approvedBy, @tokenNo, @tableId
     )
   `);
   const insertOrderItem = db.prepare(`
@@ -124,6 +145,76 @@ export function createOrdersRepository(db: AppDatabase) {
     'UPDATE orders SET status = ?, updated_at = ?, cancelled_at = ? WHERE id = ?',
   );
   const markPrinted = db.prepare('UPDATE invoices SET printed_at = ? WHERE order_id = ?');
+
+  /* ------------------------- merge / split (Phase 3) ------------------------- */
+
+  const selectItemRows = db.prepare<[number], OrderItemRow>(
+    'SELECT id, item_id, name, price, qty, line_total, notes FROM order_items WHERE order_id = ? ORDER BY id',
+  );
+  const selectItemById = db.prepare<[number], OrderItemRow>(
+    'SELECT id, item_id, name, price, qty, line_total, notes FROM order_items WHERE id = ?',
+  );
+  const deleteItem = db.prepare('DELETE FROM order_items WHERE id = ?');
+  const reparentItem = db.prepare('UPDATE order_items SET order_id = ? WHERE id = ?');
+  const countItems = db.prepare<[number], { total: number }>(
+    'SELECT COUNT(*) AS total FROM order_items WHERE order_id = ?',
+  );
+  const setMergedInto = db.prepare(
+    'UPDATE orders SET merged_into_order_id = ?, status = ?, updated_at = ? WHERE id = ?',
+  );
+  const setSplitFrom = db.prepare('UPDATE orders SET split_from_order_id = ? WHERE id = ?');
+  const setOrderTotals = db.prepare(
+    'UPDATE orders SET subtotal = ?, discount = ?, tax = ?, total = ?, updated_at = ? WHERE id = ?',
+  );
+  /* ------------------------- amendments (migration 013) ------------------------- */
+
+  const updateDetailsRow = db.prepare(`
+    UPDATE orders
+       SET customer_name = @customerName, customer_phone = @customerPhone,
+           customer_address = @customerAddress, waiter_id = @waiterId,
+           notes = @notes, updated_at = @updatedAt
+     WHERE id = @id
+  `);
+  const setTotalsWithApproval = db.prepare(`
+    UPDATE orders
+       SET subtotal = @subtotal, discount = @discount, tax = @tax, total = @total,
+           approved_by = @approvedBy, updated_at = @updatedAt
+     WHERE id = @id
+  `);
+
+  const insertAmendment = db.prepare(`
+    INSERT INTO order_amendments
+      (order_id, version, reason, before_json, after_json, changed_by, created_at)
+    VALUES (@orderId, @version, @reason, @beforeJson, @afterJson, @changedBy, @createdAt)
+  `);
+  const selectAmendments = db.prepare<
+    [number],
+    {
+      version: number;
+      reason: string;
+      before_json: string;
+      after_json: string;
+      changed_by_name: string;
+      created_at: string;
+    }
+  >(`
+    SELECT a.version, a.reason, a.before_json, a.after_json,
+           u.full_name AS changed_by_name, a.created_at
+      FROM order_amendments a
+      JOIN users u ON u.id = a.changed_by
+     WHERE a.order_id = ?
+     ORDER BY a.version
+  `);
+  const nextVersion = db.prepare<[number], { next: number }>(
+    'SELECT COALESCE(MAX(version), 0) + 1 AS next FROM order_amendments WHERE order_id = ?',
+  );
+  const bumpAmendmentCount = db.prepare(
+    'UPDATE orders SET amendment_count = amendment_count + 1 WHERE id = ?',
+  );
+  const insertCombine = db.prepare(`
+    INSERT INTO order_combines (kind, source_id, target_id, item_ids, amount, reason, created_by, created_at)
+    VALUES (@kind, @sourceId, @targetId, @itemIds, @amount, @reason, @createdBy, @createdAt)
+  `);
   const findInvoiceNo = db.prepare<[number], { invoice_no: string }>(
     'SELECT invoice_no FROM invoices WHERE order_id = ?',
   );
@@ -163,12 +254,26 @@ export function createOrdersRepository(db: AppDatabase) {
   );
 
   return {
+    /**
+     * Runs `fn` inside one SQLite transaction. Exposed so a caller can group work
+     * that spans repositories (allocating an order number and inserting the order)
+     * into a single atomic unit. If `fn` throws, everything rolls back — including
+     * the sequence rows — so a failed save never burns an ORD-/INV- number.
+     */
+    transaction<T>(fn: () => T): T {
+      return db.transaction(fn)();
+    },
+
     /** Creates the order, its items and its invoice inside one transaction. */
     create(input: {
       orderNo: string;
       invoiceNo: string;
       type: OrderType;
       status: OrderStatus;
+      /** Customer-facing token, allocated by kotRepository inside this transaction. */
+      tokenNo: number | null;
+      /** Dine-in table, or null for takeaway/delivery. */
+      tableId: number | null;
       customerName: string;
       customerPhone: string;
       customerAddress: string;
@@ -176,6 +281,9 @@ export function createOrdersRepository(db: AppDatabase) {
       deliveryBoyId: number | null;
       subtotal: number;
       discount: number;
+      discountReason: string;
+      promoCode: string;
+      approvedBy: number | null;
       taxPercent: number;
       tax: number;
       total: number;
@@ -205,6 +313,12 @@ export function createOrdersRepository(db: AppDatabase) {
         }
 
         const result = insertOrder.run({
+          // Discount audit fields (migration 010). Always present, even when empty.
+          discountReason: payload.discountReason ?? '',
+          promoCode: payload.promoCode ?? '',
+          approvedBy: payload.approvedBy ?? null,
+          tokenNo: payload.tokenNo ?? null,
+          tableId: payload.tableId ?? null,
           orderNo: payload.orderNo,
           type: payload.type,
           customerId,
@@ -272,12 +386,180 @@ export function createOrdersRepository(db: AppDatabase) {
         params.push(filter.toDate);
       }
 
+      // Keyset paging. The tuple comparison is spelled out because SQLite does not
+      // support `(a, b) < (?, ?)` before 3.15 — and spelling it out also makes the
+      // "same timestamp, lower id" tie-break obvious.
+      if (filter.after) {
+        conditions.push('(o.created_at < ? OR (o.created_at = ? AND o.id < ?))');
+        params.push(filter.after.createdAt, filter.after.createdAt, filter.after.id);
+      }
+
       const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
       const sql = `${ORDER_SELECT} ${where} ORDER BY o.created_at DESC, o.id DESC LIMIT ?`;
       params.push(filter.limit);
 
       const rows = db.prepare(sql).all(...params) as OrderRow[];
       return rows.map(toSummary);
+    },
+
+    itemsFor(orderId: number) {
+      return selectItemsForOrder.all(orderId).map(toItem);
+    },
+
+    /**
+     * Recalculates subtotal / discount / tax / total from the lines that are
+     * actually on the order. Merge and split both need this, and both must do it
+     * inside their transaction so a half-moved bill is never visible.
+     *
+     * The discount is recomputed from the same percentage it represented before,
+     * capped at the new subtotal — the alternative is silently keeping a discount
+     * that no longer relates to what the customer is buying.
+     */
+    recalculateTotals(orderId: number): void {
+      const row = selectOrderById.get(orderId);
+      if (!row) throw new AppError('NOT_FOUND', 'That order does not exist');
+
+      const subtotal = selectItemRows
+        .all(orderId)
+        .reduce((total, item) => total + item.line_total, 0);
+
+      const previousSubtotal = row.subtotal > 0 ? row.subtotal : 0;
+      const discountPercent =
+        previousSubtotal > 0 ? Math.round((row.discount / previousSubtotal) * 10_000) : 0;
+      const discount =
+        discountPercent > 0
+          ? Math.min(Math.round((subtotal * discountPercent) / 10_000), subtotal)
+          : 0;
+
+      const taxable = subtotal - discount;
+      const tax = Math.round((taxable * row.tax_percent) / 100);
+
+      setOrderTotals.run(subtotal, discount, tax, taxable + tax, toSqlDateTime(), orderId);
+    },
+
+    /** Inserts lines onto an existing order. Call inside the order's transaction. */
+    insertItems(
+      orderId: number,
+      items: Array<{
+        itemId: number;
+        name: string;
+        price: number;
+        qty: number;
+        lineTotal: number;
+        notes: string;
+      }>,
+    ): void {
+      for (const item of items) insertOrderItem.run({ orderId, ...item });
+    },
+
+    /** Customer / waiter / notes on an order, leaving money alone. */
+    updateDetails(
+      orderId: number,
+      input: {
+        customerName: string;
+        customerPhone: string;
+        customerAddress: string;
+        waiterId: number | null;
+        notes: string;
+      },
+    ): void {
+      updateDetailsRow.run({ ...input, updatedAt: toSqlDateTime(), id: orderId });
+    },
+
+    /** Writes a recalculated total, and who approved the discount on it. */
+    setTotals(
+      orderId: number,
+      input: {
+        subtotal: number;
+        discount: number;
+        tax: number;
+        total: number;
+        approvedBy: number | null;
+      },
+    ): void {
+      setTotalsWithApproval.run({ ...input, updatedAt: toSqlDateTime(), id: orderId });
+    },
+
+    /** Moves every line and the discount policy of `sourceId` onto `targetId`. */
+    absorbOrder(sourceId: number, targetId: number): void {
+      for (const item of selectItemRows.all(sourceId)) {
+        reparentItem.run(targetId, item.id);
+      }
+    },
+
+    moveItems(itemIds: number[], targetId: number): void {
+      for (const itemId of itemIds) {
+        reparentItem.run(targetId, itemId);
+      }
+    },
+
+    findItem(id: number) {
+      const row = selectItemById.get(id);
+      return row ? toItem(row) : null;
+    },
+
+    removeItem(id: number): void {
+      deleteItem.run(id);
+    },
+
+    itemCount(orderId: number): number {
+      return countItems.get(orderId)?.total ?? 0;
+    },
+
+    /** Marks an order as absorbed by another one. Its money stays where it is. */
+    markMerged(mergedInto: number, sourceId: number): void {
+      const now = toSqlDateTime();
+      setMergedInto.run(mergedInto, 'delivered', now, sourceId);
+    },
+
+    markSplitFrom(sourceId: number, targetId: number): void {
+      setSplitFrom.run(sourceId, targetId);
+    },
+
+    recordCombine(input: {
+      kind: 'merge' | 'split';
+      sourceId: number;
+      targetId: number;
+      itemIds: number[];
+      amount: number;
+      reason: string;
+      createdBy: number;
+    }): void {
+      insertCombine.run({
+        ...input,
+        itemIds: JSON.stringify(input.itemIds),
+        createdAt: toSqlDateTime(),
+      });
+    },
+
+    /**
+     * Writes one amendment with full before/after snapshots. Call inside the same
+     * transaction as the line changes, so history can never disagree with the data.
+     */
+    recordAmendment(input: {
+      orderId: number;
+      reason: string;
+      beforeJson: string;
+      afterJson: string;
+      changedBy: number;
+    }): number {
+      const version = nextVersion.get(input.orderId)?.next ?? 1;
+
+      insertAmendment.run({ ...input, version, createdAt: toSqlDateTime() });
+      bumpAmendmentCount.run(input.orderId);
+
+      return version;
+    },
+
+    amendmentsFor(orderId: number) {
+      return selectAmendments.all(orderId).map((row) => ({
+        version: row.version,
+        reason: row.reason,
+        before: JSON.parse(row.before_json) as unknown,
+        after: JSON.parse(row.after_json) as unknown,
+        changedByName: row.changed_by_name,
+        createdAt: row.created_at,
+      }));
     },
 
     updateStatus(id: number, status: OrderStatus): void {

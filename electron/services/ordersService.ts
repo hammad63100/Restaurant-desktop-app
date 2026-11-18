@@ -1,10 +1,14 @@
 import type {
+  AmendOrderInput,
+  AmendmentSnapshot,
   InvoiceData,
+  OrderAmendment,
   NewOrderInput,
   OrderDetail,
   OrderFilter,
   OrderStatus,
   OrderSummary,
+  UserRole,
 } from '../../src/types/api';
 import type { OrdersRepository } from '../db/repositories/ordersRepository';
 import type { CatalogRepository } from '../db/repositories/catalogRepository';
@@ -12,7 +16,12 @@ import type { SequenceRepository } from '../db/repositories/sequenceRepository';
 import type { SettingsRepository } from '../db/repositories/settingsRepository';
 import type { StaffRepository } from '../db/repositories/staffRepository';
 import type { UserRepository } from '../db/repositories/userRepository';
-import { percentOf } from '../utils/money';
+import { formatAmount, percentOf } from '../utils/money';
+import { toSqlDate } from '../utils/datetime';
+import type { DiscountsService } from './discountsService';
+import type { KotRepository } from '../db/repositories/kotRepository';
+import type { TablesRepository } from '../db/repositories/tablesRepository';
+import type { PaymentsRepository } from '../db/repositories/paymentsRepository';
 import { AppError } from '../utils/errors';
 import { logInfo } from './logger';
 
@@ -32,10 +41,21 @@ export function createOrdersService(deps: {
   settings: SettingsRepository;
   staff: StaffRepository;
   users: UserRepository;
+  /** Optional so the service still works in isolation; see createOrder's discount check. */
+  discounts?: DiscountsService;
+  /** Optional so the service still boots without the kitchen module. */
+  kot?: KotRepository;
+  /** Optional: the floor plan. Without it, dine-in orders are simply unseated. */
+  tables?: TablesRepository;
+  /** Optional: needed to know how much has been collected before an amendment. */
+  payments?: PaymentsRepository;
 }) {
   // `users` is kept in the dependency list because invoices record the cashier name
   // through the orders query; it is available for later phases (audit fields).
-  const { orders, catalog, sequences, settings, staff } = deps;
+  const { orders, catalog, sequences, settings, staff, discounts, kot, tables, payments } = deps;
+
+  /** Money actually collected on a bill (voided payments excluded). */
+  const paymentsSum = (orderId: number): number => payments?.sumByOrder(orderId) ?? 0;
 
   function findOrFail(id: number): OrderDetail {
     const order = orders.find(id);
@@ -49,7 +69,7 @@ export function createOrdersService(deps: {
      * totals are computed in integer paisa, and the order + items + invoice
      * are written in one transaction.
      */
-    create(input: NewOrderInput, createdBy: number): OrderDetail {
+    create(input: NewOrderInput, createdBy: number, role: UserRole = 'admin'): OrderDetail {
       const lines = input.items.map((line) => {
         const item = catalog.findItem(line.itemId);
         if (!item) throw new AppError('NOT_FOUND', `Item ${line.itemId} no longer exists`);
@@ -68,7 +88,69 @@ export function createOrdersService(deps: {
       });
 
       const subtotal = lines.reduce((total, line) => total + line.lineTotal, 0);
-      const discount = Math.min(input.discount, subtotal);
+      // Never clamp silently: a discount larger than the bill is a data-entry mistake
+      // and the cashier must see it (Rules.md: no silent money changes).
+      if (input.discount > subtotal) {
+        throw new AppError('VALIDATION_ERROR', 'Discount subtotal se zyada nahi ho sakta.');
+      }
+
+      // The role's discount rule is enforced HERE, in the main process, so a
+      // cashier cannot bypass the limit by calling the channel directly.
+      let approvedBy: number | null = null;
+      let promoCode = '';
+      let promoId: number | null = null;
+
+      if (discounts && (input.discount > 0 || (input.promoCode ?? '').trim() !== '')) {
+        const decision = discounts.resolve({
+          role,
+          subtotal,
+          percentX100: 0,
+          amount: input.discount,
+          promoCode: input.promoCode ?? '',
+          today: toSqlDate(),
+        });
+
+        if (decision.errors.length > 0) {
+          throw new AppError('VALIDATION_ERROR', decision.errors[0] ?? 'Discount is not allowed');
+        }
+
+        promoCode = decision.promoCode;
+        promoId = decision.promoId;
+
+        if (decision.needsApproval) {
+          // The approval row must already exist (discount:approve) and match this
+          // cashier, otherwise the cashier could simply claim it was approved.
+          if (typeof input.approvedBy !== 'number') {
+            throw new AppError(
+              'FORBIDDEN',
+              'This discount needs a manager approval before the order can be saved',
+            );
+          }
+
+          // `input.approvedBy` is the id of the discount_approvals row the manager
+          // created moments ago — the order does not exist yet, so it cannot be
+          // looked up by order id. The approval must match this exact amount and
+          // this cashier, and must not already be spent on another order.
+          const approval = discounts.findApproval(input.approvedBy);
+
+          if (!approval) {
+            throw new AppError('FORBIDDEN', 'That discount approval does not exist');
+          }
+          if (approval.amount !== input.discount) {
+            throw new AppError('FORBIDDEN', 'That discount approval does not match this order');
+          }
+          if (approval.requestedBy !== createdBy) {
+            throw new AppError('FORBIDDEN', 'That approval was given to a different cashier');
+          }
+          if (approval.orderId !== null) {
+            throw new AppError('FORBIDDEN', 'That approval has already been used');
+          }
+
+          approvedBy = approval.approvedBy;
+        }
+      }
+
+      const discount = input.discount;
       const taxable = subtotal - discount;
       const tax = percentOf(taxable, input.taxPercent);
       const total = taxable + tax;
@@ -84,29 +166,72 @@ export function createOrdersService(deps: {
         throw new AppError('NOT_FOUND', 'The selected delivery boy does not exist');
       }
 
-      const orderNumber = sequences.next('order');
-      const invoiceNumber = sequences.next('invoice');
+      // A table holds one open bill at a time. This is checked in the main process
+      // so a second till cannot seat two bills at T4 by calling the channel.
+      const tableId = input.type === 'dine_in' ? (input.tableId ?? null) : null;
+      if (tableId !== null) {
+        if (!tables) throw new AppError('VALIDATION_ERROR', 'Tables are not available');
+        if (!tables.isTableFree(tableId, null)) {
+          throw new AppError('CONFLICT', 'That table already has a bill open');
+        }
+      }
+
       const orderPrefix = settings.get('order_prefix') ?? 'ORD';
       const invoicePrefix = settings.get('invoice_prefix') ?? 'INV';
 
-      const orderId = orders.create({
-        orderNo: `${orderPrefix}-${String(orderNumber).padStart(5, '0')}`,
-        invoiceNo: `${invoicePrefix}-${String(invoiceNumber).padStart(5, '0')}`,
-        type: input.type,
-        status: input.status,
-        customerName: input.customerName,
-        customerPhone: input.customerPhone,
-        customerAddress: input.customerAddress,
-        waiterId: input.type === 'dine_in' ? input.waiterId : null,
-        deliveryBoyId: input.type === 'delivery' ? input.deliveryBoyId : null,
-        subtotal,
-        discount,
-        taxPercent: input.taxPercent,
-        tax,
-        total,
-        notes: input.notes,
-        createdBy,
-        items: lines,
+      // Number allocation and the insert share ONE transaction: if the insert throws,
+      // the counters roll back too and no ORD-/INV- number is burned (Rules.md: money
+      // and sequences must be atomic).
+      const orderId = orders.transaction(() => {
+        const orderNumber = sequences.next('order');
+        const invoiceNumber = sequences.next('invoice');
+
+        // A token is the number called out to the customer. Delivery orders get
+        // none: the rider knows the address, and a token would only confuse the
+        // queue of people waiting at the counter.
+        const tokenNo = input.type === 'delivery' ? null : (kot?.nextToken() ?? null);
+
+        const newOrderId = orders.create({
+          orderNo: `${orderPrefix}-${String(orderNumber).padStart(5, '0')}`,
+          invoiceNo: `${invoicePrefix}-${String(invoiceNumber).padStart(5, '0')}`,
+          type: input.type,
+          status: input.status,
+          tokenNo,
+          customerName: input.customerName,
+          customerPhone: input.customerPhone,
+          customerAddress: input.customerAddress,
+          waiterId: input.type === 'dine_in' ? input.waiterId : null,
+          deliveryBoyId: input.type === 'delivery' ? input.deliveryBoyId : null,
+          subtotal,
+          discount,
+          discountReason: input.discountReason ?? '',
+          promoCode,
+          approvedBy,
+          tableId,
+          taxPercent: input.taxPercent,
+          tax,
+          total,
+          notes: input.notes,
+          createdBy,
+          items: lines,
+        });
+
+        // Seat the order at its table in the same transaction, so the floor plan can
+        // never show a bill that does not exist.
+        if (tableId !== null) tables?.seatOrder(newOrderId, tableId);
+
+        // Count the promo redemption in the same transaction, so a promo with a
+        // use limit cannot be oversold by two tills at once (Rules.md R3).
+        if (promoId !== null) {
+          discounts?.registerPromoUse(promoId);
+        }
+
+        // Single-use approval, inside the same transaction (Rules.md R3).
+        if (approvedBy !== null && typeof input.approvedBy === 'number') {
+          discounts?.consumeApproval(input.approvedBy, newOrderId);
+        }
+
+        return newOrderId;
       });
 
       logInfo(`Order created: ${orderId} (total ${total} paisa, ${lines.length} items)`);
@@ -137,6 +262,166 @@ export function createOrdersService(deps: {
       orders.updateStatus(id, status);
       logInfo(`Order ${order.orderNo} status: ${order.status} -> ${status}`);
       return orders.find(id) as OrderSummary;
+    },
+
+    /**
+     * Replaces the lines of a saved bill (Phase 3 amendments).
+     *
+     * Three rules make this safe to expose to a till:
+     *
+     *  1. **What is already paid is untouchable.** The new total must not drop
+     *     below the money already collected — there is no refund screen that could
+     *     put the difference back, so the amendment is refused instead.
+     *  2. **The discount is re-checked for the role of the person editing.** A
+     *     cashier cannot amend their way around the ceiling they could not pass at
+     *     the till.
+     *  3. **Both versions are snapshotted.** The bill before and after is written to
+     *     order_amendments in the same transaction as the change.
+     */
+    amend(input: AmendOrderInput, editedBy: number, role: UserRole): OrderDetail {
+      const order = findOrFail(input.id);
+
+      if (order.status === 'cancelled') {
+        throw new AppError('CONFLICT', 'A cancelled bill cannot be changed');
+      }
+      if (order.mergedIntoOrderId !== null) {
+        throw new AppError('CONFLICT', 'This bill was merged into another one. Edit that bill.');
+      }
+
+      // Prices come from the menu, never from the renderer.
+      const lines = input.items.map((line) => {
+        const item = catalog.findItem(line.itemId);
+        if (!item) throw new AppError('NOT_FOUND', `Item ${line.itemId} no longer exists`);
+
+        return {
+          itemId: item.id,
+          name: item.name,
+          price: item.price,
+          qty: line.qty,
+          lineTotal: item.price * line.qty,
+          notes: line.notes,
+        };
+      });
+
+      const subtotal = lines.reduce((total, line) => total + line.lineTotal, 0);
+
+      if (input.discount > subtotal) {
+        throw new AppError('VALIDATION_ERROR', 'Discount subtotal se zyada nahi ho sakta.');
+      }
+
+      // ---- the money already taken cannot be undone here ----
+      const paid = paymentsSum(order.id);
+      if (paid > 0 && subtotal - input.discount < paid) {
+        throw new AppError(
+          'CONFLICT',
+          `This bill already has ${formatAmount(paid)} paid on it. The new total cannot be lower than that.`,
+        );
+      }
+
+      // ---- the discount rule, for the role of the person editing ----
+      let approvedBy: number | null = order.approvedBy;
+      if (discounts && input.discount > 0) {
+        const decision = discounts.resolve({
+          role,
+          subtotal,
+          percentX100: 0,
+          amount: input.discount,
+          promoCode: '',
+          today: toSqlDate(),
+        });
+
+        if (decision.errors.length > 0) {
+          throw new AppError('VALIDATION_ERROR', decision.errors[0] ?? 'Discount is not allowed');
+        }
+
+        if (decision.needsApproval) {
+          const approvalId = input.approvedBy;
+          if (typeof approvalId !== 'number') {
+            throw new AppError(
+              'FORBIDDEN',
+              'This discount needs a manager approval before the bill can be changed',
+            );
+          }
+
+          const approval = discounts.findApproval(approvalId);
+          if (!approval || approval.amount !== input.discount || approval.orderId !== null) {
+            throw new AppError('FORBIDDEN', 'That discount approval does not match this change');
+          }
+          approvedBy = approval.approvedBy;
+        }
+      }
+
+      const taxable = subtotal - input.discount;
+      const tax = percentOf(taxable, order.taxPercent);
+      const total = taxable + tax;
+
+      const before: AmendmentSnapshot = {
+        subtotal: order.subtotal,
+        discount: order.discount,
+        tax: order.tax,
+        total: order.total,
+        items: order.items.map((line) => ({
+          itemId: line.itemId,
+          name: line.name,
+          qty: line.qty,
+          price: line.price,
+          lineTotal: line.lineTotal,
+        })),
+      };
+
+      const after: AmendmentSnapshot = {
+        subtotal,
+        discount: input.discount,
+        tax,
+        total,
+        items: lines.map((line) => ({
+          itemId: line.itemId,
+          name: line.name,
+          qty: line.qty,
+          price: line.price,
+          lineTotal: line.lineTotal,
+        })),
+      };
+
+      orders.transaction(() => {
+        // Lines are replaced wholesale: an amendment states the full new bill, which
+        // is far easier to reason about than a stream of add/remove deltas.
+        for (const line of order.items) orders.removeItem(line.id);
+        orders.insertItems(order.id, lines);
+
+        orders.updateDetails(order.id, {
+          customerName: input.customerName ?? order.customerName,
+          customerPhone: input.customerPhone ?? order.customerPhone,
+          customerAddress: input.customerAddress ?? order.customerAddress,
+          waiterId: input.waiterId ?? order.waiterId,
+          notes: input.notes ?? order.notes,
+        });
+
+        orders.setTotals(order.id, { subtotal, discount: input.discount, tax, total, approvedBy });
+
+        orders.recordAmendment({
+          orderId: order.id,
+          reason: input.reason,
+          beforeJson: JSON.stringify(before),
+          afterJson: JSON.stringify(after),
+          changedBy: editedBy,
+        });
+
+        if (typeof input.approvedBy === 'number' && approvedBy !== null) {
+          discounts?.consumeApproval(input.approvedBy, order.id);
+        }
+      });
+
+      logInfo(
+        `Order ${order.orderNo} amended: ${before.total} -> ${total} paisa (${input.reason})`,
+      );
+
+      return findOrFail(order.id);
+    },
+
+    amendments(id: number): OrderAmendment[] {
+      findOrFail(id);
+      return orders.amendmentsFor(id) as OrderAmendment[];
     },
 
     cancel(id: number): OrderSummary {

@@ -11,6 +11,7 @@ const DEFAULTS: ShopSettings = {
   taxPercent: 0,
   receiptWidth: '80mm',
   backupOnClose: true,
+  printerSilent: true,
 };
 
 interface SettingsState {

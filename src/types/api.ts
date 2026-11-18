@@ -10,7 +10,20 @@ export type UserRole = 'admin' | 'cashier' | 'manager';
 
 /** Pages a role is allowed to open. Enforced in the main process. */
 export type PageKey =
-  'home' | 'orders' | 'menu' | 'staff' | 'vehicles' | 'reports' | 'users' | 'settings';
+  | 'home'
+  | 'orders'
+  | 'menu'
+  | 'staff'
+  | 'vehicles'
+  | 'reports'
+  | 'users'
+  | 'settings'
+  // Phase 2 (3.A) — customer credit ("udhaar") ledger.
+  | 'udhaar'
+  // Phase 2 (3.B) — day close.
+  | 'shifts'
+  // Phase 3 — dine-in floor plan, merging and splitting bills.
+  | 'tables';
 
 /** Fine grained write permissions, so a cashier can open the menu but not edit it. */
 export type Capability =
@@ -22,7 +35,21 @@ export type Capability =
   | 'reports:read'
   | 'users:write'
   | 'settings:write'
-  | 'backup:write';
+  | 'backup:write'
+  // Phase 2 (3.A) — payments and the udhaar ledger.
+  | 'payments:write'
+  | 'payments:void'
+  | 'udhaar:read'
+  | 'udhaar:settle'
+  // Phase 2 (3.B) — day close / shift.
+  | 'shifts:read'
+  | 'shifts:write'
+  // Phase 2 (3.C) — discount rules and manager approval.
+  | 'discount:write'
+  | 'discount:approve'
+  | 'kot:print'
+  // Editing the floor plan, merging bills and splitting them.
+  | 'tables:write';
 
 export interface RolePermissions {
   role: UserRole;
@@ -113,6 +140,165 @@ export interface MenuItemInput {
 export type OrderType = 'dine_in' | 'takeaway' | 'delivery';
 export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'delivered' | 'cancelled';
 
+/** How money reached the till. 'credit' means it did not reach it yet (udhaar). */
+export type PaymentMethod = 'cash' | 'card' | 'jazzcash' | 'easypaisa' | 'bank_transfer' | 'credit';
+
+export type PaymentStatus = 'unpaid' | 'partial' | 'paid' | 'refunded';
+
+export interface Payment {
+  id: number;
+  orderId: number;
+  method: PaymentMethod;
+  amount: number;
+  tendered: number | null;
+  changeDue: number | null;
+  reference: string;
+  createdBy: number;
+  createdAt: string;
+  voidedAt: string | null;
+  voidReason: string;
+}
+
+export interface AddPaymentInput {
+  orderId: number;
+  method: PaymentMethod;
+  amount: number;
+  tendered: number | null;
+  changeDue: number | null;
+  reference: string;
+}
+
+export interface DiscountRule {
+  id: number;
+  role: UserRole;
+  maxPercentX100: number;
+  maxAmount: number | null;
+  requiresApprovalAbovePercentX100: number;
+  active: boolean;
+}
+
+export interface PromoCode {
+  id: number;
+  code: string;
+  kind: 'percent' | 'fixed';
+  value: number;
+  minOrder: number;
+  validFrom: string | null;
+  validTo: string | null;
+  maxUses: number | null;
+  uses: number;
+  active: boolean;
+}
+
+/** Result of checking a requested discount. Never clamps: it reports instead. */
+export interface DiscountDecision {
+  allowed: boolean;
+  needsApproval: boolean;
+  amount: number;
+  percentX100: number;
+  errors: string[];
+  promoCode: string;
+  /** Set only when a promo code supplied the discount, so the order can count it. */
+  promoId: number | null;
+}
+
+export interface DiscountApproval {
+  id: number;
+  orderId: number | null;
+  requestedBy: number;
+  approvedBy: number | null;
+  percentX100: number;
+  amount: number;
+  reason: string;
+  createdAt: string;
+}
+
+export type ShiftStatus = 'open' | 'closed';
+export type CashMovementKind = 'sale' | 'cash_in' | 'cash_out' | 'refund' | 'expense';
+
+export interface Shift {
+  id: number;
+  terminal: string;
+  openedBy: number;
+  openedByName: string;
+  openedAt: string;
+  closedBy: number | null;
+  closedByName: string | null;
+  closedAt: string | null;
+  openingCash: number;
+  expectedCash: number | null;
+  countedCash: number | null;
+  difference: number | null;
+  status: ShiftStatus;
+  notes: string;
+}
+
+export interface CashMovement {
+  id: number;
+  shiftId: number;
+  kind: CashMovementKind;
+  method: PaymentMethod;
+  amount: number;
+  reason: string;
+  refOrderId: number | null;
+  createdBy: number;
+  createdByName: string;
+  createdAt: string;
+}
+
+/** The X/Z report: everything the day-close screen and the printed slip need. */
+export interface ShiftReport {
+  shift: Shift;
+  salesByMethod: CollectionByMethod[];
+  totalSales: number;
+  orderCount: number;
+  cashSales: number;
+  cashIn: number;
+  cashOut: number;
+  refunds: number;
+  expenses: number;
+  discountTotal: number;
+  cancelledCount: number;
+  cancelledValue: number;
+  topItems: TopItemRow[];
+  /** Cash-in/out/refund/expense rows for this shift, newest last. */
+  movements: CashMovement[];
+  /**
+   * What should be in the drawer right now. For an open shift this is computed
+   * live (that is the point of an X report); for a closed one it is the stored
+   * figure from the close.
+   */
+  expectedCash: number;
+  /** Null for an X report (shift still open). */
+  variance: number | null;
+}
+
+export interface CollectionByMethod {
+  method: PaymentMethod;
+  count: number;
+  total: number;
+}
+
+export interface CustomerLedgerEntry {
+  id: number;
+  customerId: number;
+  orderId: number | null;
+  paymentId: number | null;
+  entryType: 'charge' | 'payment';
+  amount: number;
+  balanceAfter: number;
+  note: string;
+  createdAt: string;
+}
+
+export interface UdhaarAccount {
+  customerId: number;
+  name: string;
+  phone: string;
+  balance: number;
+  lastActivity: string | null;
+}
+
 export interface OrderItemInput {
   itemId: number;
   qty: number;
@@ -137,7 +323,14 @@ export interface NewOrderInput {
   customerAddress: string;
   waiterId: number | null;
   deliveryBoyId: number | null;
+  /** Dine-in table. Ignored (and cleared) for takeaway and delivery. */
+  tableId?: number | null;
   discount: number;
+  /** Why the discount was given. Stored on the order for the audit trail. */
+  discountReason?: string;
+  promoCode?: string;
+  /** Set when a manager approved an above-limit discount. */
+  approvedBy?: number | null;
   taxPercent: number;
   notes: string;
   items: OrderItemInput[];
@@ -149,12 +342,24 @@ export interface OrderSummary {
   invoiceNo: string | null;
   type: OrderType;
   status: OrderStatus;
+  tokenNo: number | null;
+  /** How many times this bill has been edited (0 = untouched). */
+  amendmentCount: number;
+  /** Set when this bill was merged into another one; its money stayed here. */
+  mergedIntoOrderId: number | null;
+  /** Set when this bill was carved out of another one. */
+  splitFromOrderId: number | null;
+  /** The dine-in table this bill sits at, if any. */
+  tableId: number | null;
   customerName: string;
   customerPhone: string;
   subtotal: number;
   discount: number;
   tax: number;
   total: number;
+  /** Money collected so far, read from orders.paid_amount (never recomputed). */
+  paidAmount: number;
+  paymentStatus: PaymentStatus;
   createdAt: string;
   createdByName: string;
   waiterName: string | null;
@@ -165,6 +370,8 @@ export interface OrderDetail extends OrderSummary {
   customerAddress: string;
   waiterId: number | null;
   deliveryBoyId: number | null;
+  /** Who approved the discount on this bill, when one was needed. */
+  approvedBy: number | null;
   taxPercent: number;
   notes: string;
   printedAt: string | null;
@@ -178,6 +385,113 @@ export interface OrderFilter {
   fromDate: string;
   toDate: string;
   limit: number;
+  /**
+   * Keyset cursor: return only orders older than this one. Offsetting by page
+   * number gets slower the deeper you scroll and can repeat a row when a new order
+   * is created between pages, so the list asks for "after this" instead.
+   */
+  after?: { createdAt: string; id: number } | null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dine-in tables, merge and split (Phase 3)                           */
+/* ------------------------------------------------------------------ */
+
+export interface DiningTable {
+  id: number;
+  name: string;
+  seats: number;
+  area: string;
+  active: boolean;
+  /** The open dine-in order sitting here, if any. */
+  orderId: number | null;
+  orderNo: string | null;
+  /** What that order is worth so far, in paisa. 0 when the table is free. */
+  openTotal: number;
+  /** Total of everything ever rung up at this table, for the owner's report. */
+  lifetimeSales: number;
+}
+
+/* ------------------------------------------------------------------ */
+/* Order amendments (Phase 3)                                          */
+/* ------------------------------------------------------------------ */
+
+/** What a bill looked like at one point in its life, for the history view. */
+export interface AmendmentSnapshot {
+  subtotal: number;
+  discount: number;
+  tax: number;
+  total: number;
+  items: Array<{ itemId: number; name: string; qty: number; price: number; lineTotal: number }>;
+}
+
+export interface OrderAmendment {
+  version: number;
+  reason: string;
+  before: AmendmentSnapshot;
+  after: AmendmentSnapshot;
+  changedByName: string;
+  createdAt: string;
+}
+
+export interface AmendOrderInput {
+  id: number;
+  /** Why the bill is being changed. Mandatory: it is the audit trail. */
+  reason: string;
+  /** The complete new set of lines. Replaces what was there. */
+  items: Array<{ itemId: number; qty: number; notes: string }>;
+  discount: number;
+  /** Set when the new discount needs a manager's approval. */
+  approvedBy?: number | null;
+  customerName?: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  waiterId?: number | null;
+  notes?: string;
+}
+
+export interface MergeResult {
+  order: OrderDetail;
+  /** The order numbers that were absorbed, oldest first. */
+  mergedOrderNos: string[];
+}
+
+export interface SplitResult {
+  /** The bill the lines were taken from. */
+  source: OrderDetail;
+  /** The new bill holding the moved lines. */
+  target: OrderDetail;
+}
+
+/* ------------------------------------------------------------------ */
+/* Kitchen tickets and tokens (feature 3.D)                            */
+/* ------------------------------------------------------------------ */
+
+export interface KOTItem {
+  /** order_items.id — lets a reprint target specific lines later. */
+  id: number;
+  name: string;
+  qty: number;
+  notes: string;
+}
+
+/**
+ * A kitchen ticket. Deliberately has no prices: the kitchen works from what to
+ * cook, not from what the customer paid.
+ */
+export interface KOT {
+  orderId: number;
+  orderNo: string;
+  tokenNo: number | null;
+  type: OrderType;
+  status: OrderStatus;
+  customerName: string;
+  waiterName: string | null;
+  notes: string;
+  createdAt: string;
+  items: KOTItem[];
+  /** 0 means this is the first print; anything else is a reprint. */
+  printCount: number;
 }
 
 export interface InvoiceData {
@@ -432,6 +746,8 @@ export interface ShopSettings {
   taxPercent: number;
   receiptWidth: '80mm' | 'a4';
   backupOnClose: boolean;
+  /** Print without the system dialog. Off means the cashier picks a printer each time. */
+  printerSilent: boolean;
 }
 
 export interface AppUser {
@@ -486,12 +802,94 @@ export interface OrdersApi {
   create(input: NewOrderInput): Promise<ApiResult<OrderDetail>>;
   list(filter: OrderFilter): Promise<ApiResult<OrderSummary[]>>;
   get(id: number): Promise<ApiResult<OrderDetail>>;
+  /** Replaces the lines of a saved bill, keeping a full snapshot of both versions. */
+  amend(input: AmendOrderInput): Promise<ApiResult<OrderDetail>>;
+  /** The edit history, oldest first. */
+  amendments(id: number): Promise<ApiResult<OrderAmendment[]>>;
   updateStatus(id: number, status: OrderStatus): Promise<ApiResult<OrderSummary>>;
   cancel(id: number): Promise<ApiResult<OrderSummary>>;
   invoice(id: number): Promise<ApiResult<InvoiceData>>;
   markPrinted(id: number): Promise<ApiResult<OrderDetail>>;
   print(id: number, paper: '80mm' | 'a4'): Promise<ApiResult<{ printed: boolean }>>;
   savePdf(id: number, paper: '80mm' | 'a4'): Promise<ApiResult<{ path: string | null }>>;
+}
+
+export interface PaymentsApi {
+  addPayment(input: AddPaymentInput): Promise<ApiResult<Payment>>;
+  voidPayment(id: number, reason: string): Promise<ApiResult<Payment>>;
+  listByOrder(orderId: number): Promise<ApiResult<Payment[]>>;
+  udhaarList(): Promise<ApiResult<UdhaarAccount[]>>;
+  udhaarLedger(customerId: number): Promise<ApiResult<CustomerLedgerEntry[]>>;
+  settleUdhaar(input: {
+    customerId: number;
+    method: PaymentMethod;
+    amount: number;
+    reference: string;
+    orderId: number | null;
+  }): Promise<ApiResult<CustomerLedgerEntry>>;
+}
+
+export interface DiscountsApi {
+  rules(): Promise<ApiResult<DiscountRule[]>>;
+  saveRule(input: DiscountRule): Promise<ApiResult<DiscountRule>>;
+  validate(input: {
+    subtotal: number;
+    percentX100: number;
+    amount: number;
+    promoCode: string;
+  }): Promise<ApiResult<DiscountDecision>>;
+  approve(input: {
+    orderId: number | null;
+    percentX100: number;
+    amount: number;
+    reason: string;
+    username: string;
+    password: string;
+  }): Promise<ApiResult<DiscountApproval>>;
+  listPromos(): Promise<ApiResult<PromoCode[]>>;
+  savePromo(input: Omit<PromoCode, 'id' | 'uses'> & { id?: number }): Promise<ApiResult<PromoCode>>;
+  deletePromo(id: number): Promise<ApiResult<null>>;
+}
+
+export interface TablesApi {
+  list(): Promise<ApiResult<DiningTable[]>>;
+  save(input: {
+    id?: number;
+    name: string;
+    seats: number;
+    area: string;
+    active: boolean;
+  }): Promise<ApiResult<DiningTable>>;
+  remove(id: number): Promise<ApiResult<null>>;
+  /** Merges sourceId into targetId; both must be open dine-in orders with no money taken. */
+  merge(input: { sourceId: number; targetId: number }): Promise<ApiResult<MergeResult>>;
+  /** Moves the given order lines onto a brand new bill. */
+  split(input: {
+    orderId: number;
+    itemIds: number[];
+    moveTable: boolean;
+  }): Promise<ApiResult<SplitResult>>;
+}
+
+export interface KotApi {
+  /** The ticket for one order. Read-only; no side effects. */
+  ticket(orderId: number): Promise<ApiResult<KOT>>;
+  /** Renders and prints the kitchen ticket; records the print in kot_prints. */
+  print(orderId: number): Promise<ApiResult<{ printed: boolean }>>;
+}
+
+export interface ShiftsApi {
+  current(): Promise<ApiResult<Shift | null>>;
+  open(openingCash: number): Promise<ApiResult<Shift>>;
+  close(input: { countedCash: number; notes: string }): Promise<ApiResult<ShiftReport>>;
+  report(shiftId?: number): Promise<ApiResult<ShiftReport>>;
+  list(limit?: number): Promise<ApiResult<Shift[]>>;
+  addCashMovement(input: {
+    kind: CashMovementKind;
+    amount: number;
+    reason: string;
+  }): Promise<ApiResult<CashMovement>>;
+  print(shiftId: number, paper: '80mm' | 'a4'): Promise<ApiResult<{ printed: boolean }>>;
 }
 
 export interface StaffApi {
@@ -589,6 +987,11 @@ export interface RendererApi {
   reports: ReportsApi;
   settings: SettingsApi;
   users: UsersApi;
+  payments: PaymentsApi;
+  shifts: ShiftsApi;
+  discounts: DiscountsApi;
+  kot: KotApi;
+  tables: TablesApi;
 }
 
 /** IPC channel names, kept in one place so main, preload and the dev bridge cannot drift. */
@@ -616,6 +1019,44 @@ export const CHANNELS = {
   orderMarkPrinted: 'orders:mark-printed',
   orderPrint: 'orders:print',
   orderPdf: 'orders:pdf',
+
+  paymentAdd: 'payment:add',
+  paymentVoid: 'payment:void',
+  paymentListByOrder: 'payment:list-by-order',
+  udhaarList: 'udhaar:list',
+  udhaarSettle: 'udhaar:settle',
+  udhaarLedger: 'udhaar:ledger',
+
+  shiftCurrent: 'shift:current',
+  shiftOpen: 'shift:open',
+  shiftClose: 'shift:close',
+  shiftReport: 'shift:x-report',
+  shiftList: 'shift:list',
+  shiftCashMovement: 'shift:cash-movement',
+  shiftPrint: 'shift:print',
+
+  discountRules: 'discount:rules',
+  discountSaveRule: 'discount:save-rule',
+  discountValidate: 'discount:validate',
+  discountApprove: 'discount:approve',
+  promoList: 'promo:list',
+  promoSave: 'promo:save',
+  promoDelete: 'promo:delete',
+
+  // Kitchen tickets (feature 3.D)
+  kotTicket: 'kot:ticket',
+  kotPrint: 'kot:print',
+
+  // Dine-in tables, merge and split (Phase 3)
+  tablesList: 'tables:list',
+  tableSave: 'table:save',
+  tableDelete: 'table:delete',
+  orderMerge: 'order:merge',
+  orderSplit: 'order:split',
+
+  // Order amendments (Phase 3)
+  orderAmend: 'order:amend',
+  orderAmendments: 'order:amendments',
 
   waiters: 'staff:waiters',
   waiterSave: 'staff:waiter-save',

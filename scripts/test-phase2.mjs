@@ -2,7 +2,11 @@
  * Phase 2 checks: dashboard, shell permission map, settings, users, backups.
  * Runs the real services through the IPC registry (no display needed).
  */
+import { readdirSync } from 'node:fs';
+import path from 'node:path';
 import { createHarness, createRunner } from './test-harness.mjs';
+
+const compiledDir = path.resolve(import.meta.dirname, '..', 'dist-electron', 'electron');
 
 const harness = createHarness({ withDemoData: true });
 const runner = createRunner('Phase 2 — Dashboard, settings and users');
@@ -16,9 +20,15 @@ await harness.loginAs('admin', 'admin123').then(() =>
   }),
 );
 
-await runner.check('all six new migrations run on a fresh database', () => {
-  if (harness.migrationsApplied !== 7)
-    throw new Error(`expected 7 migrations, got ${harness.migrationsApplied}`);
+await runner.check('every shipped migration runs on a fresh database', () => {
+  // Count the files so adding a migration never breaks this test.
+  const sqlFiles = readdirSync(path.join(compiledDir, 'db', 'migrations')).filter((file) =>
+    file.endsWith('.sql'),
+  ).length;
+
+  if (harness.migrationsApplied !== sqlFiles) {
+    throw new Error(`expected ${sqlFiles} migrations, got ${harness.migrationsApplied}`);
+  }
 });
 
 await runner.check('dashboard returns today numbers and recent orders', async () => {

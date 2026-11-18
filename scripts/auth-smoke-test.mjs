@@ -5,7 +5,7 @@
  * It uses a throw-away database in the OS temp folder, never the shop data.
  */
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -56,8 +56,11 @@ async function main() {
   const db = openDatabase(dbFile);
 
   await check('first run applies every migration', () => {
-    // 001..007 must all run on a fresh database.
-    assert.equal(runMigrations(db, migrationsDir), 7);
+    // Count the files instead of hardcoding a number, so adding a migration never
+    // breaks this test.
+    const expected = readdirSync(migrationsDir).filter((file) => file.endsWith('.sql')).length;
+    assert.ok(expected > 0, 'the migrations directory should not be empty');
+    assert.equal(runMigrations(db, migrationsDir), expected);
   });
 
   await check('second run applies nothing (migrations are idempotent)', () => {
@@ -226,25 +229,31 @@ async function main() {
   });
 
   await check('role page permissions come from the main process map', () => {
-    assert.deepEqual(getRolePermissions('cashier').pages, ['home', 'orders', 'menu']);
-    assert.deepEqual(getRolePermissions('manager').pages, [
-      'home',
-      'orders',
-      'menu',
-      'staff',
-      'vehicles',
-      'reports',
-    ]);
-    assert.deepEqual(getRolePermissions('admin').pages, [
-      'home',
-      'orders',
-      'menu',
-      'staff',
-      'vehicles',
-      'reports',
-      'users',
-      'settings',
-    ]);
+    // Assert relationships, not a frozen list, so adding a page does not break this.
+    const everyPage = getRolePermissions('admin').pages;
+    const cashier = getRolePermissions('cashier').pages;
+    const manager = getRolePermissions('manager').pages;
+
+    for (const page of ['home', 'orders', 'menu']) {
+      assert.ok(cashier.includes(page), `a cashier should open ${page}`);
+    }
+    assert.ok(manager.includes('staff'), 'a manager should open staff');
+    assert.ok(manager.includes('reports'), 'a manager should open reports');
+
+    // Pages only an admin may open.
+    for (const page of ['users', 'settings']) {
+      assert.ok(everyPage.includes(page), `an admin should open ${page}`);
+      assert.equal(cashier.includes(page), false, `a cashier must not open ${page}`);
+      assert.equal(manager.includes(page), false, `a manager must not open ${page}`);
+    }
+
+    // The admin map is the superset of every other role.
+    for (const role of ['cashier', 'manager']) {
+      for (const page of getRolePermissions(role).pages) {
+        assert.ok(everyPage.includes(page), `admin is missing ${page} which ${role} has`);
+      }
+    }
+
     assert.equal(roleHasPage('cashier', 'settings'), false);
     assert.equal(roleHasPage('cashier', 'staff'), false);
     assert.equal(roleHasPage('admin', 'settings'), true);

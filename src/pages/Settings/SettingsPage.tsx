@@ -19,13 +19,17 @@ import { PageHeader } from '../../components/PageHeader';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { toast } from '../../components/Toast';
 import { Alert } from '../../components/Alert';
+import { DiscountsCard } from './DiscountsCard';
 
 /** Form values keep the defaulted fields optional; the schema fills them in. */
 type SettingsFormValues = z.input<typeof shopSettingsSchema>;
 
 export function SettingsPage() {
-  const { can } = useAuth();
+  const { can, capabilities } = useAuth();
   const canWrite = can('settings');
+  // The settings page is admin-only, but the discount controls also check the
+  // capability so a future manager-level settings page cannot expose them.
+  const canApprove = capabilities.includes('discount:approve');
   const settings = useSettingsStore((state) => state.settings);
   const saveSettings = useSettingsStore((state) => state.save);
 
@@ -149,6 +153,16 @@ export function SettingsPage() {
                 <input type="checkbox" className="h-4 w-4" {...register('backupOnClose')} />
                 Back up the database when the app closes
               </label>
+              <label className="flex items-start gap-2 text-body text-text-primary">
+                <input type="checkbox" className="mt-0.5 h-4 w-4" {...register('printerSilent')} />
+                <span>
+                  Print silently
+                  <span className="block text-caption text-text-secondary">
+                    Send receipts straight to the default printer. Turn this off to choose a
+                    printer for each slip.
+                  </span>
+                </span>
+              </label>
             </div>
 
             <div className="mt-6 border-t border-border pt-4">
@@ -261,6 +275,12 @@ export function SettingsPage() {
           </Card>
         </div>
       </div>
+
+      {canApprove && (
+        <div className="mt-4">
+          <DiscountsCard canWrite={canWrite} />
+        </div>
+      )}
 
       <ConfirmDialog
         isOpen={restoreTarget !== null}
