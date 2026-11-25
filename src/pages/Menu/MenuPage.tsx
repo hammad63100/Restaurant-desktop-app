@@ -2,9 +2,9 @@ import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { Resolver } from 'react-hook-form';
-import { ChefHat, CircleOff, Pencil, Plus, Search, Trash2, Utensils } from 'lucide-react';
+import { CircleOff, Pencil, Plus, Search, Trash2, Utensils } from 'lucide-react';
 import { z } from 'zod';
-import type { Category, Ingredient, MenuItem, RecipeLine } from '../../types/api';
+import type { Category, MenuItem } from '../../types/api';
 import { categorySchema, menuItemSchema } from '../../types/schemas';
 import { errorMessage, getApi, unwrap } from '../../utils/api';
 import { useAsync } from '../../hooks/useAsync';
@@ -21,7 +21,6 @@ import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { MoneyInput } from '../../components/MoneyInput';
 import { toast } from '../../components/Toast';
 import { Alert } from '../../components/Alert';
-import { RecipeEditorModal } from './RecipeEditorModal';
 
 type CategoryFormValues = z.input<typeof categorySchema>;
 type ItemFormValues = z.input<typeof menuItemSchema>;
@@ -43,23 +42,8 @@ export function MenuPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Recipes and the cost column. `costs` is only fetched when the role is allowed
-  // to see money: a manager may run the menu without seeing what it costs.
-  const canCost = allow('costs:read');
-  const canRecipe = allow('recipes:write');
-  const [recipeItem, setRecipeItem] = useState<MenuItem | null>(null);
-  const [recipeLines, setRecipeLines] = useState<RecipeLine[]>([]);
-  const [recipeIngredients, setRecipeIngredients] = useState<Ingredient[]>([]);
-
   const categories = useAsync(async () => unwrap(await getApi().menu.listCategories()), []);
   const items = useAsync(async () => unwrap(await getApi().menu.listItems()), []);
-  const costs = useAsync(
-    async () => (canCost ? unwrap(await getApi().recipes.menuCosts()) : null),
-    [canCost],
-  );
-
-  const costOf = (itemId: number) =>
-    (costs.data?.rows ?? []).find((row) => row.itemId === itemId) ?? null;
 
   const categoryForm = useForm<CategoryFormValues>({
     resolver: zodResolver(categorySchema) as unknown as Resolver<CategoryFormValues>,
@@ -132,28 +116,6 @@ export function MenuPage() {
     });
     setFormError(null);
     setItemModal(item);
-  };
-
-  const openRecipe = async (item: MenuItem) => {
-    try {
-      const [recipe, ingredients] = await Promise.all([
-        getApi().recipes.recipe(item.id),
-        getApi().stock.ingredients(),
-      ]);
-
-      setRecipeLines(unwrap(recipe).lines);
-      // Only active ingredients can join a recipe: a deleted one would cost
-      // nothing and quietly understate the dish.
-      setRecipeIngredients(unwrap(ingredients).filter((candidate) => candidate.active));
-      setRecipeItem(item);
-    } catch (error) {
-      toast.error(errorMessage(error));
-    }
-  };
-
-  const reloadCosts = async () => {
-    await items.reload();
-    await costs.reload();
   };
 
   const submitCategory = categoryForm.handleSubmit(async (values) => {
@@ -237,79 +199,6 @@ export function MenuPage() {
       render: (row) => <span className="font-medium">{formatAmount(row.price)}</span>,
     },
     {
-      key: 'cost',
-      header: 'Cost / profit',
-      align: 'right',
-      // Hidden entirely for roles that may not see money (the capability is
-      // enforced in the main process too — this is only the polite version).
-      render: (row) => {
-        if (!canCost) return <span className="text-text-secondary">—</span>;
-
-        const cost = costOf(row.id);
-        if (!cost || !cost.hasRecipe) {
-          return (
-            <span className="text-caption text-text-secondary">
-              Cost unknown — add a recipe
-            </span>
-          );
-        }
-
-        return (
-          <div className="flex flex-col items-end">
-            <span className="text-caption text-text-secondary">{formatAmount(cost.costTotal)}</span>
-            <span
-              className={`text-caption font-medium ${
-                cost.belowTarget ? 'text-status-cancelled' : 'text-status-success'
-              }`}
-            >
-              {cost.profit === null ? '—' : `${formatAmount(cost.profit)} profit`}
-              {cost.marginPercentX100 !== null && ` · ${(cost.marginPercentX100 / 100).toFixed(0)}%`}
-            </span>
-          </div>
-        );
-      },
-    },
-    {
-      /*
-       * "Can make N" (4.C) — the tightest ingredient in the recipe.
-       *
-       * The client's reason for the whole stock feature: "taky mujhe pata lagy"
-       * so I know what is left. The number already existed in the service; it had
-       * simply never been shown, which left the owner with a shelf count and no
-       * answer to the question he actually asks at the counter.
-       *
-       * Deliberately blank for an item with no recipe, and for a role that may not
-       * see costs: how many you can sell is a stock fact, but it is derived from a
-       * recipe the cashier is not shown.
-       */
-      key: 'canMake',
-      header: 'Can make',
-      align: 'right',
-      render: (row) => {
-        if (!canCost) return <span className="text-text-secondary">—</span>;
-
-        const cost = costOf(row.id);
-        if (!cost || !cost.hasRecipe || cost.canMake === null) {
-          return <span className="text-text-secondary">—</span>;
-        }
-
-        // Zero is the number that matters: it means the kitchen cannot make one
-        // more, and it should not be the same grey as "not applicable".
-        return (
-          <span
-            className={
-              cost.canMake === 0
-                ? 'tabular font-medium text-status-cancelled'
-                : 'tabular'
-            }
-            title={cost.canMake === 0 ? 'An ingredient in this recipe has run out' : undefined}
-          >
-            {cost.canMake}
-          </span>
-        );
-      },
-    },
-    {
       key: 'available',
       header: 'Availability',
       render: (row) => (
@@ -333,20 +222,6 @@ export function MenuPage() {
               <CircleOff
                 aria-hidden
                 className={`h-4 w-4 ${row.available ? 'text-text-secondary' : 'text-status-success'}`}
-              />
-            </Button>
-          )}
-          {canRecipe && (
-            <Button
-              variant="ghost"
-              onClick={() => void openRecipe(row)}
-              title={costOf(row.id)?.hasRecipe ? 'Edit recipe' : 'Add a recipe'}
-            >
-              <ChefHat
-                aria-hidden
-                className={`h-4 w-4 ${
-                  costOf(row.id)?.hasRecipe ? 'text-status-success' : 'text-text-secondary'
-                }`}
               />
             </Button>
           )}
@@ -496,20 +371,6 @@ export function MenuPage() {
           <Utensils aria-hidden className="h-3.5 w-3.5" />
           Your role can mark items sold out, but not change the menu.
         </p>
-      )}
-
-      {recipeItem && (
-        <RecipeEditorModal
-          // Re-key on open so the draft always starts from the saved recipe.
-          key={`${recipeItem.id}-${recipeLines.length}-${recipeLines[0]?.ingredientId ?? 0}`}
-          isOpen
-          item={recipeItem}
-          lines={recipeLines}
-          ingredients={recipeIngredients}
-          price={recipeItem.price}
-          onClose={() => setRecipeItem(null)}
-          onSaved={reloadCosts}
-        />
       )}
 
       <Modal

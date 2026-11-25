@@ -9,7 +9,7 @@ export function BrandPanel() {
           <UtensilsCrossed aria-hidden className="h-5 w-5" />
         </span>
         <div>
-          <p className="font-heading text-card-title">FoodiesGo</p>
+          <p className="font-heading text-card-title">Gul Khan Fast Food</p>
           <p className="text-caption text-white/60">Shop Management</p>
         </div>
       </div>

@@ -48,7 +48,7 @@ export function LoginPage() {
       <main className="flex flex-1 items-center justify-center p-6">
         <div className="w-full max-w-[400px]">
           <div className="mb-6 lg:hidden">
-            <p className="font-heading text-section-title text-text-primary">FoodiesGo</p>
+            <p className="font-heading text-section-title text-text-primary">Gul Khan Fast Food</p>
             <p className="text-caption text-text-secondary">Shop Management</p>
           </div>
 

@@ -7,11 +7,9 @@
 Fast Food Management Desktop App (Electron + React + SQLite)
 
 ## Current Status
-- Current phase: **Roadmap Phase 4 complete — 4.A → 4.I all done (410 checks / 25 suites).**
-- Original six phases and the roadmap hardening are complete and merged.
-- File currently being worked on: `docs/memory.md` (last code files:
-  `src/pages/Expenses/RecurringBillsPanel.tsx`, `src/pages/Stock/SupplierReturnModal.tsx`,
-  `electron/db/repositories/recurringBillsRepository.ts`, `scripts/test-phase24.mjs`)
+- Current phase: **Roadmap Phase 1 (release blockers) complete — PR open, CI green. Phase 2 not started.**
+- Original six phases are code complete and merged; the roadmap below hardens them before new features.
+- File currently being worked on: `docs/memory.md` (last code file: `src/pages/Reports/ReportsPage.tsx`)
 - App runs offline; data file: `%APPDATA%\gul-khan-fast-food\data\fastfood.db`
 - Logs: `%APPDATA%\gul-khan-fast-food\logs\app.log`
 - Backups: `%APPDATA%\gul-khan-fast-food\backups\` (auto on close, keeps last 7)
@@ -63,8 +61,7 @@ PR #2 (`arena/7b07c844-gul-khan-fast-food` → `main`) carries phases 2–6; all
 
 ## Verification (headless)
 `npm run verify` runs typecheck + lint + all phase tests.
-Last result: **410 checks passed, 0 failed across 25 suites** (`npm run test:all`), stable across
-repeated runs.
+Last result: **107 checks passed, 0 failed** (`npm run test:all`), stable across repeated runs.
 
 | Suite | Checks |
 | --- | --- |
@@ -75,10 +72,6 @@ repeated runs.
 | Phase 5 (`scripts/test-phase5.mjs`) | 13 |
 | Phase 6 (`scripts/test-phase6.mjs`) | 13 |
 | Phase 7 (`scripts/test-phase7.mjs`) | 17 |
-| Phase 8–22 (roadmap, hardening, Phase 4) | 240 |
-| Phase 23 (`scripts/test-phase23.mjs`) — salaries + vehicle costs in the P&L | 8 |
-| Phase 24 (`scripts/test-phase24.mjs`) — opening stock, supplier returns, price trend, recurring bills | 16 |
-| Phase 25 (`scripts/test-phase25.mjs`) — house-made ingredients (sub-recipes) | 10 |
 
 ## Decisions Made
 - Electron 45, React 19, Vite 7, TypeScript 5.9, Tailwind 3, Zustand 5, React Router 7 (hash
@@ -273,175 +266,6 @@ The five things that were fine in a demo and wrong in a shop. Each has a test in
   **Load older orders** button and discards accumulated pages when a filter changes (in the filter
   setter, not an effect — the React compiler rejects `setState` inside `useEffect`).
 
-## Phase 4 — Inventory, recipes and expenses (migrations 015–023)
-
-The client's six requirements, in the app. 410 checks across 25 suites, `npm run verify` green.
-
-### 4.H — follow-up round (migrations 022)
-
-Built after an audit of the plan against the finished app. `test-phase23.mjs` (8 checks) covers
-salaries + vehicle costs as first-class P&L lines; `test-phase24.mjs` (16 checks) covers opening
-stock, supplier returns, purchases-by-ingredient with the price trend, and recurring bills
-(`022_recurring_bills.sql`).
-
-Three rules worth remembering, because they are easy to "simplify" back into bugs:
-
-- `operatingExpenses = shopExpenses + salaries + vehicleCosts`, but **wastage is never added** —
-  it is already inside `cogs` at the moment it spoiled. It is reported, not summed.
-- A recurring bill's reminder is **read-only**. The dashboard says "rent is due in two days";
-  the expense is booked only when the owner confirms the amount, and it is dated the *due date*
-  of that month, not the day of confirmation.
-- A supplier return is **not a void**. The bill stays posted; only the returned quantity leaves
-  the shelf, valued at the current average so the shelf is never repriced.
-
-### 4.I — house-made ingredients / sub-recipes (migration 023)
-
-`test-phase25.mjs` (10 checks). An ingredient can be made instead of bought.
-
-- `ingredients.batch_yield_base > 0` means "one batch makes this much"; `0` means bought.
-- `ingredient_recipe_items` is the batch recipe; the cost is **derived**
-  (`Σ components ÷ yield`), never typed, so it follows live component prices.
-- `sub_recipe_batches` is a stock document: components come off as `sub_recipe_make`,
-  the product goes on at the computed cost. **Frozen at the batch** — a later price rise
-  never rewrites an old batch.
-- **Value-neutral**: the test asserts the signed sum of every `sub_recipe_make` movement is
-  zero, which is what catches a rounding rule applied on one side only.
-- **One level only** — a house-made ingredient cannot be a component of another. The service
-  refuses and says to use the raw ingredients instead.
-- `applyMovement` treats `sub_recipe_make` like a purchase for AVERAGE COST purposes. Without
-  this, house mayo sat at a zero average and every burger using it looked free.
-
-**UI gap closed after 4.I:** `menuCosts.canMake` ("how many can I still sell", the client's own
-reason for the stock feature) was computed by the service and typed in the API but **never shown on
-any screen**. It now has a **Can make** column on the Menu page, red at 0. Worth remembering: a
-field that exists in the service and the types can still be invisible to the owner, and no
-automated test notices that — only reading the screens does.
-
-**Migration 023 rebuilds the whole `stock_movements` table** (SQLite cannot alter a CHECK
-constraint) to add the two new kinds. With `foreign_keys = ON`, dropping the old table fails
-while rows reference it, so the migration renames, recreates, copies (keeping ids), and leaves
-the emptied original as `stock_movements_legacy_016`. `ref_batch_id` is added at the same time.
-The repository probes for that column and the batch-yield column, so a database that has not run
-023 degrades instead of crashing.
-
-### What exists now
-
-- **4.A — ingredients, suppliers, starter list** (`015_inventory.sql`, phase15, 19 checks).
-  Base units g / ml / pcs with a purchase unit and conversion (`units_per_purchase`), so the shop
-  buys a 100-bun packet and sells one bun. A starter catalogue of fast-food ingredients is offered
-  on first use and is idempotent. Soft delete; an ingredient used by a recipe cannot be deleted.
-- **4.B — purchases and the stock ledger** (`016_purchases.sql`, phase16, 23 checks).
-  `stock_movements` is the single source of truth; `ingredients.qty_on_hand` is a cache of it and
-  the tests assert they agree. Weighted moving average per receipt, landed cost (extra charges are
-  spread over the lines), void purchase (history kept), opening stock, low-stock flags. A **cash**
-  purchase paid inside an open shift writes an `expense` cash movement; a credit purchase touches
-  nothing. Voiding refunds into the shift that paid, or into today's drawer if that day is closed.
-- **4.C — recipes and costing** (`018_recipes.sql`, phase17, 20 checks).
-  One recipe per menu item, per-serving quantities in base units with an optional waste %. Cost is
-  the sum of `qty × average cost`; profit and margin follow. `canMake` is the tightest ingredient.
-  An item with no recipe reports cost `null`, never 0 — unknown is not free. The owner sets the
-  price; a suggested price for a target margin is offered, never applied.
-- **4.D — automatic deduction** (`019_deduction.sql`, phase18, 18 checks).
-  Saving a bill deducts inside the **same transaction**, so a blocked sale leaves neither a bill
-  nor a moved shelf. Each line's cost is frozen in `order_item_stock` + `order_items.cost_total`,
-  so a later price rise or recipe edit cannot rewrite last week's profit. Cancel returns the stock,
-  or — cooked — returns it and books the same quantity as `wastage` (return-then-write-off; writing
-  wastage on top of an untouched sale would remove the stock twice). Amend releases the old
-  snapshot, rewrites the lines, re-deducts at today's cost. Merge and split move no stock.
-  `stock_movements.ref_order_item_id` is `ON DELETE SET NULL` so an amendment can delete lines.
-- **4.E — shop expenses** (`020_expenses.sql`, phase19, 12 checks).
-  Categories ship with the app (rent, electricity, gas, salaries, repairs, … plus a built-in
-  "Other"). A **cash** expense writes a `cash_out`-equivalent `expense` movement on the open shift
-  — the kind is `expense`, because that is what `expectedCash` and the Z report subtract. Bank and
-  outside-money expenses never touch the drawer. A cash expense with no open shift is refused, not
-  silently dropped. Void keeps the row (`status='void'`, reason, who) and refunds the drawer, into
-  the paying shift if still open, else into today's.
-
-- **4.F — wastage, adjustments, stock count** (`021_stock_ops.sql`, phase21, 15 checks).
-  The three ways a shelf moves that are neither a purchase nor a sale, which is exactly why a
-  stock figure drifts a month after go-live. **Wastage** takes a positive quantity, values it at
-  the current average cost, and stores a reason code (`spoiled` / `dropped` / `expired` /
-  `staff_meal` / `test` / `other`) plus optional notes. It refuses a future date, a zero, and more
-  than is on the shelf — the answer to a wrong shelf is a count, not a write-off — and it never
-  moves the average cost (a quantity event is not a price event). **Adjustment** is signed, needs a
-  reason of at least three characters, and cannot remove more than exists. **Stock count** is the
-  important one: the shelf is **SET** to the counted quantity, one `stock_count` movement per
-  differing line, with `book_qty`, `counted_qty`, `variance` and a `variance_value` frozen at the
-  day's average cost. A line that matches writes no movement but is still stored, so the count is
-  a complete record. Numbers are `CNT-00001`. **Supplier return** needed no new table — the ledger
-  already had the `supplier_return` kind. UI: a **Wastage** tab (period report, money by reason,
-  entry modal with a live estimate) and a **Stock counts** tab (count list, count detail with
-  book-vs-counted, adjust button). Both writes sit behind `stock:adjust`, which a cashier does not
-  have: a cashier may read the loss, never write it off.
-- **4.G — profit & loss** (no migration, phase20, 12 checks).
-  The report the owner actually asked for: `net sales (ex tax, after discounts) − cost of
-  food = gross profit`, then `− shop expenses = net profit`. One tab on the Reports page,
-  marked "Profit & loss", opens first.
-- **4.G part two — the reporting set** (no migration, phase22, 18 checks).
-  Five more report channels behind `costs:read` (`reports:item-profit`, `reports:stock-valuation`,
-  `reports:purchases`, `reports:wastage`, `reports:expenses`), five new tabs on Reports, four
-  dashboard cards and CSV for all six reports. Every number is made to **reconcile with the P&L**
-  rather than be computed independently, and the suite asserts three of those equalities:
-  item-profit priced revenue = `knownNetSales`, its cost = `cogs`, expense total = `shopExpenses`,
-  wastage total = `wastageValue`. Stock valuation reads through the same `listIngredients()` the
-  Stock page uses, so the two totals cannot drift.
-
-### The two rules the P&L lives or dies by
-
-1. **Sales and cost are summed over the same bills.** A bill saved before its item had a
-   recipe carries no cost snapshot and can never be priced honestly afterwards. The first
-   implementation returned `cogs: null` for the whole period if *any* line was unpriced —
-   which meant that a shop that added recipes later would show "Unknown" profit forever.
-   It now splits the period: `knownNetSales` and `cogs` are a like-for-like pair (all
-   arithmetic runs on those), and `unknownNetSales` / `unpricedBills` are reported beside
-   them and explained on screen. The owner can amend an old bill to price it on purpose.
-2. **Tax is never income.** It is collected for the government; a P&L that counts it
-   would inflate every margin. It is shown on its own line and excluded from profit.
-
-### Gotchas that cost time (do not relearn these)
-
-- **`cogs` must sum only fully-costed bills.** The first version summed every bill's cost while
-  `knownNetSales` counted only the costed bills' sales, so a mixed bill (one costed line, one
-  without a recipe) charged real cost against sales that had been excluded — and the P&L showed a
-  loss on a day that made money. Phase 20's original assertion (`grossProfit = knownNetSales −
-  cogs`) could not catch it, because it holds even when `cogs` is wrong; the test now compares
-  `cogs` against a SQL rebuild that filters `unknown = 0`. Reverting the fix makes the suite fail.
-- **A dashboard profit card must be `null`, never negative, when nothing could be costed.** A day
-  with sales but no costed bill has unknown profit; `knownNetSales === 0` is the test for it.
-- **`hasRecipe` is about the item today, `unpricedReason` is about the bill.** An item sold before
-  its recipe existed has unpriced lines forever (a recipe is not a time machine) but is not a
-  problem to fix — telling the owner "no recipe" sends them hunting for something already done.
-- **`GROUP BY` must come after `WHERE`.** Adding the cost aggregate to `ORDER_SELECT` put
-  `GROUP BY o.id` inside the shared string, and every filtered order query then died with
-  `near "WHERE": syntax error`. It is a separate `ORDER_GROUP` constant appended after the filter.
-- **`stock_movements.ref_order_item_id` was `RESTRICT`.** Amending a bill deletes its lines, so the
-  FK blocked every amended bill. It is now `SET NULL`; `releaseOrder()` also detaches the refs so
-  databases created before the change still work.
-- **The category-delete channel takes `{ id }`, not a number**, and the preview bridge must forward
-  the same shape as preload.
-- **better-sqlite3 rejects mixed parameter styles** in one statement — use `@name` everywhere.
-- **`shift:x-report` takes `{ shiftId }`, not `{ id }`**; an x-report on a *closed* shift is what
-  the tests use to prove a closed day was not rewritten.
-- **A drawer expense must use the `expense` movement kind**, not `cash_out`: `expectedCash`
-  and the Z report subtract `expense`, so `cash_out` takes the money out but leaves the
-  report's expense line at zero.
-- **A stock count's variance value is Σ|variance| × cost, not Σvariance × cost.** Shortages and
-  overages on different ingredients do not cancel out: the owner needs to know the *size* of the
-  discrepancy, and a +50 g overage does not make a −50 g shortage disappear.
-- **`countLineSchema` must be refined for duplicates on the array, not per line.** Two lines for
-  the same ingredient would set the shelf twice in one transaction, so the duplicate check lives on
-  the whole object with a `path` pointing at `lines`.
-- **`StockCountModal` computes its variance total with the same formula as the service** so the
-  figure the owner reads before saving is the figure that is saved. If you change one, change both.
-- **The preview server must inject the bridge on `/` too.** It used to serve
-  `dist/index.html` raw for the root path, so the preview loaded with no `window.api` and
-  the login button did nothing. Only real assets are served byte-for-byte now.
-
 ## Last Updated
-- Date: 2026-11-22
-- By: Arena Agent (Phase 4 — 4.A to 4.G). All six client requirements delivered, plus wastage /
-  adjustments / stock counts and the full reporting set; 400 checks across 24 suites;
-  `npm run verify` green. Phase 4 is complete.
-- Open next: the eight client questions in `docs/inventory-expenses-plan.md` §15 (portions,
-  who sees profit, supplier credit, in-house sauces, opening stock, recurring bills) and the
-  deferred 4.E2 items (recurring bills, owner drawings).
+- Date: 2026-11-16
+- By: Arena Agent (Phase 3 — hardening)

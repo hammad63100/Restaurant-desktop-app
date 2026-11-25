@@ -21,22 +21,8 @@ const ROLE_PAGES: Record<UserRole, PageKey[]> = {
     'udhaar',
     'shifts',
     'tables',
-    'stock',
-    'expenses',
   ],
-  manager: [
-    'home',
-    'orders',
-    'menu',
-    'staff',
-    'vehicles',
-    'reports',
-    'udhaar',
-    'shifts',
-    'tables',
-    'stock',
-    'expenses',
-  ],
+  manager: ['home', 'orders', 'menu', 'staff', 'vehicles', 'reports', 'udhaar', 'shifts', 'tables'],
   cashier: ['home', 'orders', 'menu', 'udhaar', 'shifts', 'tables'],
 };
 
@@ -61,17 +47,6 @@ const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
     'discount:approve',
     'kot:print',
     'tables:write',
-    // Roadmap Phase 4 — the owner's books.
-    'inventory:read',
-    'inventory:write',
-    'purchases:write',
-    'purchases:void',
-    'stock:adjust',
-    'recipes:write',
-    'expenses:read',
-    'expenses:write',
-    'expenses:void',
-    'costs:read',
   ],
   manager: [
     'orders:write',
@@ -90,17 +65,6 @@ const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
     'discount:approve',
     'kot:print',
     'tables:write',
-    // A manager runs the shop day to day and sees stock and expenses, but NOT
-    // 'costs:read' — cost, margin and profit stay the owner's numbers.
-    'inventory:read',
-    'inventory:write',
-    'purchases:write',
-    'purchases:void',
-    'stock:adjust',
-    'recipes:write',
-    'expenses:read',
-    'expenses:write',
-    'expenses:void',
   ],
   // A cashier takes payments and may look at udhaar, but cannot void money or settle
   // a customer account — that is a manager decision.
@@ -114,9 +78,6 @@ const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
     'shifts:write',
     'discount:write',
     'kot:print',
-    // A cashier may see stock levels (to answer "is the zinger available?") and
-    // the low-stock banner, but cannot change stock, costs or the books.
-    'inventory:read',
     // NOTE: a cashier deliberately has **no** 'tables:write'. They merge and split
     // bills all day (both channels are gated on 'orders:write'), but the floor plan
     // itself — table names, seat counts, removing tables — is a manager decision.

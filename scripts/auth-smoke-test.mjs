@@ -104,7 +104,7 @@ async function main() {
   });
 
   await check('default settings are seeded', () => {
-    assert.equal(settings.get('shop_name'), 'FoodiesGo');
+    assert.equal(settings.get('shop_name'), 'Gul Khan Fast Food');
     assert.equal(settings.get('tax_percent'), '0');
   });
 

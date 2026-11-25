@@ -3,7 +3,7 @@ import type { ShopSettings } from '../types/api';
 import { getApi, unwrap } from '../utils/api';
 
 const DEFAULTS: ShopSettings = {
-  shopName: 'FoodiesGo',
+  shopName: 'Gul Khan Fast Food',
   shopAddress: '',
   shopPhone: '',
   shopLogo: null,

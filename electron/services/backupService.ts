@@ -148,7 +148,7 @@ export function createBackupService(
           .map((row) => (row as { name: string }).name);
 
         if (!tables.includes('schema_migrations') || !tables.includes('orders')) {
-          throw new AppError('VALIDATION_ERROR', 'That file is not a FoodiesGo backup');
+          throw new AppError('VALIDATION_ERROR', 'That file is not a Gul Khan Fast Food backup');
         }
 
         const highest = candidate

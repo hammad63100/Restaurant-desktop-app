@@ -20,7 +20,6 @@ import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { toast } from '../../components/Toast';
 import { Alert } from '../../components/Alert';
 import { DiscountsCard } from './DiscountsCard';
-import { StockSettingsCard } from './StockSettingsCard';
 
 /** Form values keep the defaulted fields optional; the schema fills them in. */
 type SettingsFormValues = z.input<typeof shopSettingsSchema>;
@@ -280,8 +279,6 @@ export function SettingsPage() {
       {canApprove && (
         <div className="mt-4">
           <DiscountsCard canWrite={canWrite} />
-
-          <StockSettingsCard canWrite={canWrite} />
         </div>
       )}
 

@@ -21,17 +21,6 @@ const suites = [
   ['Phase 12', 'test-phase12.mjs'],
   ['Phase 13', 'test-phase13.mjs'],
   ['Phase 14', 'test-phase14.mjs'],
-  ['Phase 15 — stock', 'test-phase15.mjs'],
-  ['Phase 16 — purchases', 'test-phase16.mjs'],
-  ['Phase 17 — recipes', 'test-phase17.mjs'],
-  ['Phase 18 — deduction', 'test-phase18.mjs'],
-  ['Phase 19 — expenses', 'test-phase19.mjs'],
-  ['Phase 20 — profit & loss', 'test-phase20.mjs'],
-  ['Phase 21 — wastage, adjustments, stock counts', 'test-phase21.mjs'],
-  ['Phase 22 — item profit, stock value and spend reports', 'test-phase22.mjs'],
-  ['Phase 23 — salaries and vehicle costs in the P&L', 'test-phase23.mjs'],
-  ['Phase 24 — opening stock, supplier returns, price trend', 'test-phase24.mjs'],
-  ['Phase 25 — house-made ingredients / sub-recipes', 'test-phase25.mjs'],
 ];
 
 const results = [];

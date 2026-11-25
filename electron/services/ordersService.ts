@@ -24,7 +24,6 @@ import type { TablesRepository } from '../db/repositories/tablesRepository';
 import type { PaymentsRepository } from '../db/repositories/paymentsRepository';
 import { AppError } from '../utils/errors';
 import { logInfo } from './logger';
-import type { StockDeductionService } from './stockDeductionService';
 
 /** Allowed status moves. A cancelled order is final, a delivered one cannot go back. */
 const STATUS_FLOW: Record<OrderStatus, OrderStatus[]> = {
@@ -50,16 +49,10 @@ export function createOrdersService(deps: {
   tables?: TablesRepository;
   /** Optional: needed to know how much has been collected before an amendment. */
   payments?: PaymentsRepository;
-  /**
-   * Optional: takes ingredients off the shelf when a bill is saved (Roadmap 4.D).
-   * Optional so the service still works in isolation and in older tests.
-   */
-  stock?: StockDeductionService;
 }) {
   // `users` is kept in the dependency list because invoices record the cashier name
   // through the orders query; it is available for later phases (audit fields).
-  const { orders, catalog, sequences, settings, staff, discounts, kot, tables, payments, stock } =
-    deps;
+  const { orders, catalog, sequences, settings, staff, discounts, kot, tables, payments } = deps;
 
   /** Money actually collected on a bill (voided payments excluded). */
   const paymentsSum = (orderId: number): number => payments?.sumByOrder(orderId) ?? 0;
@@ -238,33 +231,10 @@ export function createOrdersService(deps: {
           discounts?.consumeApproval(input.approvedBy, newOrderId);
         }
 
-        /*
-         * Stock deduction (Roadmap 4.D) happens HERE, inside the same transaction
-         * as the bill itself. If any ingredient check throws — a blocked sale on
-         * an empty shelf — the order, its invoice, its token and the stock all
-         * roll back together. A bill can never exist whose ingredients were not
-         * taken off the shelf, and the shelf can never move for a bill that failed.
-         */
-        if (stock) {
-          const saved = orders.find(newOrderId);
-          if (saved) stock.deductOrder({ order: saved, createdBy });
-        }
-
         return newOrderId;
       });
 
       logInfo(`Order created: ${orderId} (total ${total} paisa, ${lines.length} items)`);
-
-      // Availability flags are cosmetic and must never fail an order that is
-      // already saved and paid for, so they run after the commit, best effort.
-      if (stock) {
-        try {
-          stock.refreshAvailability();
-        } catch (error) {
-          logInfo(`Could not refresh sold-out flags: ${String(error)}`);
-        }
-      }
-
       return findOrFail(orderId);
     },
 
@@ -414,18 +384,6 @@ export function createOrdersService(deps: {
       };
 
       orders.transaction(() => {
-        /*
-         * Stock first (Roadmap 4.D): the old deductions are returned and the new
-         * lines are costed at today's recipe and average price.
-         *
-         * This has to happen BEFORE the lines are deleted. `order_item_stock`
-         * remembers which ingredients each line consumed, and its foreign key
-         * points at `order_items.id`, so the snapshot must be released while the
-         * lines still exist. It is also inside the transaction, so the shelf, the
-         * snapshots and the bill can never disagree.
-         */
-        if (stock) stock.releaseOrder({ order, createdBy: editedBy });
-
         // Lines are replaced wholesale: an amendment states the full new bill, which
         // is far easier to reason about than a stream of add/remove deltas.
         for (const line of order.items) orders.removeItem(line.id);
@@ -452,23 +410,7 @@ export function createOrdersService(deps: {
         if (typeof input.approvedBy === 'number' && approvedBy !== null) {
           discounts?.consumeApproval(input.approvedBy, order.id);
         }
-
-        // Now that the new lines have ids, take their ingredients out. The cost of
-        // an amended bill is today's cost: the amendment states what is being eaten
-        // now. Old, untouched bills keep the snapshot they were saved with.
-        if (stock) {
-          const amended = orders.find(order.id);
-          if (amended) stock.deductOrder({ order: amended, createdBy: editedBy });
-        }
       });
-
-      if (stock) {
-        try {
-          stock.refreshAvailability();
-        } catch {
-          // Cosmetic only.
-        }
-      }
 
       logInfo(
         `Order ${order.orderNo} amended: ${before.total} -> ${total} paisa (${input.reason})`,
@@ -482,16 +424,8 @@ export function createOrdersService(deps: {
       return orders.amendmentsFor(id) as OrderAmendment[];
     },
 
-    /**
-     * Cancels a bill and decides what happens to its ingredients.
-     *
-     * `prepared` means the kitchen already cooked it. The default depends on the
-     * status: nothing has been cooked while a bill is pending, and by the time it
-     * is preparing or ready the food is on the pass. The cashier can override,
-     * because only the person at the counter knows what really happened.
-     */
-    cancel(input: { id: number; prepared?: boolean }, cancelledBy: number): OrderSummary {
-      const order = findOrFail(input.id);
+    cancel(id: number): OrderSummary {
+      const order = findOrFail(id);
       if (order.status === 'cancelled') {
         throw new AppError('CONFLICT', 'This order is already cancelled');
       }
@@ -499,26 +433,9 @@ export function createOrdersService(deps: {
         throw new AppError('CONFLICT', 'A delivered order cannot be cancelled');
       }
 
-      const prepared =
-        input.prepared ?? (order.status === 'preparing' || order.status === 'ready');
-
-      orders.transaction(() => {
-        if (stock) stock.reverseOrder({ order, prepared, createdBy: cancelledBy });
-        orders.updateStatus(order.id, 'cancelled');
-      });
-
-      if (stock) {
-        try {
-          stock.refreshAvailability();
-        } catch {
-          // Cosmetic only; the cancellation itself is already saved.
-        }
-      }
-
-      logInfo(
-        `Order ${order.orderNo} cancelled (${prepared ? 'already cooked' : 'not cooked'})`,
-      );
-      return orders.find(order.id) as OrderSummary;
+      orders.updateStatus(id, 'cancelled');
+      logInfo(`Order ${order.orderNo} cancelled`);
+      return orders.find(id) as OrderSummary;
     },
 
     /** Data the invoice template needs: order + items + shop header + cashier name. */

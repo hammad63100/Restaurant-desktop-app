@@ -192,29 +192,6 @@ export function createStaffRepository(db: AppDatabase) {
     DO UPDATE SET base = excluded.base, deductions = excluded.deductions,
                   advances = excluded.advances, net = excluded.net, paid_on = excluded.paid_on
   `);
-  // Salaries PAID in a range, joined to the person so the report can name them.
-  // The two staff tables are separate, so the name is resolved per type rather than
-  // with one join (a waiter id and a delivery-boy id can be the same number).
-  const sumSalaryPaid = db.prepare<[string, string], { total: number | null; count: number }>(
-    'SELECT COALESCE(SUM(net), 0) AS total, COUNT(*) AS count FROM salary_payments WHERE paid_on BETWEEN ? AND ?',
-  );
-  const sumSalaryByPerson = db.prepare<
-    [string, string],
-    { personType: PersonType; name: string; total: number; count: number }
-  >(`
-    SELECT sp.person_type AS personType,
-           COALESCE(w.name, d.name, 'Former staff') AS name,
-           SUM(sp.net) AS total,
-           COUNT(*) AS count
-      FROM salary_payments sp
-      LEFT JOIN waiters w
-             ON sp.person_type = 'waiter' AND w.id = sp.person_id
-      LEFT JOIN delivery_boys d
-             ON sp.person_type = 'delivery_boy' AND d.id = sp.person_id
-     WHERE sp.paid_on BETWEEN ? AND ?
-     GROUP BY sp.person_type, sp.person_id
-     ORDER BY total DESC
-  `);
   const sumAdvancesMonth = db.prepare<[PersonType, number, string], { total: number | null }>(
     'SELECT SUM(amount) AS total FROM advances WHERE person_type = ? AND person_id = ? AND date LIKE ?',
   );
@@ -338,27 +315,6 @@ export function createStaffRepository(db: AppDatabase) {
     ): SalaryPaymentRecord | null {
       const row = selectSalaryPayment.get(personType, personId, month);
       return row ? toSalaryPayment(row) : null;
-    },
-
-    /**
-     * Salaries actually paid out inside a date range (4.G).
-     *
-     * Filtered on `paid_on`, not `month`: a July salary handed over on 3 August is
-     * August's cost, and a P&L that counted it in July would be wrong twice — once
-     * for each month. `net` is what left the shop (base − deductions − advances
-     * already applied when the payment was recorded), so that is the figure.
-     */
-    salaryPaidBetween(fromDate: string, toDate: string): {
-      total: number;
-      count: number;
-      byPerson: Array<{ personType: PersonType; name: string; total: number; count: number }>;
-    } {
-      const row = sumSalaryPaid.get(fromDate, toDate);
-      return {
-        total: row?.total ?? 0,
-        count: row?.count ?? 0,
-        byPerson: sumSalaryByPerson.all(fromDate, toDate),
-      };
     },
 
     saveSalaryPayment(input: {

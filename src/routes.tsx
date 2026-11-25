@@ -17,8 +17,6 @@ import { VehiclesPage } from './pages/Vehicles/VehiclesPage';
 import { ReportsPage } from './pages/Reports/ReportsPage';
 import { SettingsPage } from './pages/Settings/SettingsPage';
 import { UsersPage } from './pages/Users/UsersPage';
-import { StockPage } from './pages/Stock/StockPage';
-import { ExpensesPage } from './pages/Expenses/ExpensesPage';
 
 /**
  * Hash routing is used because the packaged app runs from file://.
@@ -130,22 +128,6 @@ export const router = createHashRouter([
         element: (
           <ProtectedRoute requiredPage="shifts">
             <DayClosePage />
-          </ProtectedRoute>
-        ),
-      },
-      {
-        path: 'stock',
-        element: (
-          <ProtectedRoute requiredPage="stock">
-            <StockPage />
-          </ProtectedRoute>
-        ),
-      },
-      {
-        path: 'expenses',
-        element: (
-          <ProtectedRoute requiredPage="expenses">
-            <ExpensesPage />
           </ProtectedRoute>
         ),
       },

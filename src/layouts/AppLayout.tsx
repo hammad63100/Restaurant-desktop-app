@@ -2,8 +2,6 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   BarChart3,
   Car,
-  Package,
-  ReceiptText,
   ClipboardList,
   HandCoins,
   LayoutDashboard,
@@ -29,8 +27,6 @@ const PAGE_ICONS: Record<PageKey, typeof LayoutDashboard> = {
   udhaar: HandCoins,
   shifts: Lock,
   tables: Table2,
-  stock: Package,
-  expenses: ReceiptText,
   staff: Users,
   vehicles: Car,
   reports: BarChart3,

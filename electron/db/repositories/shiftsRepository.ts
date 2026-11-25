@@ -35,8 +35,6 @@ interface MovementRow {
   amount: number;
   reason: string;
   ref_order_id: number | null;
-  ref_purchase_id: number | null;
-  ref_expense_id: number | null;
   created_by: number;
   created_by_name: string;
   created_at: string;
@@ -70,8 +68,6 @@ function toMovement(row: MovementRow): CashMovement {
     amount: row.amount,
     reason: row.reason,
     refOrderId: row.ref_order_id,
-    refPurchaseId: row.ref_purchase_id,
-    refExpenseId: row.ref_expense_id ?? null,
     createdBy: row.created_by,
     createdByName: row.created_by_name,
     createdAt: row.created_at,
@@ -122,11 +118,9 @@ export function createShiftsRepository(db: AppDatabase) {
 
   const insertMovement = db.prepare(`
     INSERT INTO cash_movements
-      (shift_id, kind, method, amount, reason, ref_order_id, ref_purchase_id,
-       ref_expense_id, created_by, created_at)
+      (shift_id, kind, method, amount, reason, ref_order_id, created_by, created_at)
     VALUES
-      (@shiftId, @kind, @method, @amount, @reason, @refOrderId, @refPurchaseId,
-       @refExpenseId, @createdBy, @createdAt)
+      (@shiftId, @kind, @method, @amount, @reason, @refOrderId, @createdBy, @createdAt)
   `);
 
   const selectMovement = db.prepare<[number], MovementRow>(`
@@ -151,17 +145,6 @@ export function createShiftsRepository(db: AppDatabase) {
      WHERE p.shift_id = ? AND p.voided_at IS NULL
      GROUP BY p.method
      ORDER BY p.method
-  `);
-
-  const selectPurchaseMovement = db.prepare<
-    [number, string],
-    { id: number; shift_id: number; amount: number; kind: CashMovementKind }
-  >(`
-    SELECT id, shift_id, amount, kind
-      FROM cash_movements
-     WHERE ref_purchase_id = ? AND kind = ?
-     ORDER BY id DESC
-     LIMIT 1
   `);
 
   const sumMovements = db.prepare<[number, string], { total: number }>(`
@@ -257,10 +240,6 @@ export function createShiftsRepository(db: AppDatabase) {
       amount: number;
       reason: string;
       refOrderId: number | null;
-      /** Set when a purchase moved the cash, so a void can reverse exactly this row. */
-      refPurchaseId?: number | null;
-      /** Set when a shop expense moved the cash, so a void can reverse exactly this row. */
-      refExpenseId?: number | null;
       createdBy: number;
     }): CashMovement {
       return db.transaction(() => {
@@ -277,8 +256,6 @@ export function createShiftsRepository(db: AppDatabase) {
           amount: input.amount,
           reason: input.reason,
           refOrderId: input.refOrderId,
-          refPurchaseId: input.refPurchaseId ?? null,
-          refExpenseId: input.refExpenseId ?? null,
           createdBy: input.createdBy,
           createdAt: toSqlDateTime(),
         });
@@ -291,20 +268,6 @@ export function createShiftsRepository(db: AppDatabase) {
 
     movements(shiftId: number): CashMovement[] {
       return selectMovements.all(shiftId).map(toMovement);
-    },
-
-    /**
-     * The drawer row a purchase wrote, if any.
-     * `expense` for the money that left the till when it was bought, `cash_in` for
-     * the reversed row written by a void.
-     */
-    purchaseMovement(purchaseId: number, kind: 'expense' | 'cash_in'): {
-      id: number;
-      shiftId: number;
-      amount: number;
-    } | null {
-      const row = selectPurchaseMovement.get(purchaseId, kind);
-      return row ? { id: row.id, shiftId: row.shift_id, amount: row.amount } : null;
     },
 
     salesByMethod(shiftId: number): CollectionByMethod[] {

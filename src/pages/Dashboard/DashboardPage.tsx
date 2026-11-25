@@ -2,16 +2,12 @@ import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowRight,
-  BellRing,
   Bike,
   ClipboardList,
-  Package,
   Plus,
   ShoppingBag,
   TrendingUp,
   Utensils,
-  UtensilsCrossed,
-  Wallet,
 } from 'lucide-react';
 import type { OrderSummary } from '../../types/api';
 import { ORDER_STATUS_CLASSES, ORDER_STATUS_LABELS, ORDER_TYPE_LABELS } from '../../types/labels';
@@ -90,10 +86,7 @@ function SalesSparkline({ rows }: { rows: { date: string; sales: number }[] }) {
 }
 
 export function DashboardPage() {
-  const { can, allow, user } = useAuth();
-  // Cost, profit, stock value and shop expenses are the owner's numbers (4.G).
-  const canSeeCosts = allow('costs:read');
-  const canSeeExpenses = allow('expenses:read');
+  const { can, user } = useAuth();
   const currency = useSettings((settings) => settings.currency);
 
   const { data, isLoading, error, reload } = useAsync(
@@ -197,112 +190,6 @@ export function DashboardPage() {
           tone="info"
         />
       </div>
-
-      {/*
-       * Monthly bills that are due or late (4.E2).
-       *
-       * A nudge, not a booking: this banner never creates an expense — it says what
-       * is coming and links to the screen where the owner confirms the amount. Rent
-       * is the one cost that is easy to forget for a week and impossible to explain
-       * afterwards, which is exactly why it belongs on the first screen he opens.
-       */}
-      {canSeeExpenses && (data?.billsDue.length ?? 0) > 0 && (
-        <Card className="mb-6 border-warning/40 bg-warning/5">
-          <div className="flex flex-wrap items-start gap-3">
-            <BellRing aria-hidden className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
-            <div className="min-w-0 flex-1">
-              <p className="font-medium text-text-primary">
-                {data!.billsDue.length} monthly bill
-                {data!.billsDue.length === 1 ? '' : 's'} to settle
-              </p>
-              <p className="text-body text-text-secondary">
-                {data!.billsDue
-                  .map(
-                    (bill) =>
-                      `${bill.name} — ${
-                        bill.overdue
-                          ? `${Math.abs(bill.daysUntilDue)} day${Math.abs(bill.daysUntilDue) === 1 ? '' : 's'} late`
-                          : bill.daysUntilDue === 0
-                            ? 'due today'
-                            : `due in ${bill.daysUntilDue} day${bill.daysUntilDue === 1 ? '' : 's'}`
-                      }`,
-                  )
-                  .join(' · ')}
-              </p>
-            </div>
-            <Link
-              to="/expenses"
-              className="text-button font-medium text-primary hover:underline"
-            >
-              {allow('expenses:write') ? 'Record the payment' : 'View expenses'}
-            </Link>
-          </div>
-        </Card>
-      )}
-
-      {/*
-       * Roadmap 4.G cards. They only appear for a role that may see costs
-       * (`costs:read`), because every number here — the day's gross profit, the
-       * money on the shelf, today's spend — is one of the owner's private figures.
-       */}
-      {canSeeCosts && (
-        <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard
-            label="Today's gross profit"
-            value={
-              data?.todayProfit
-                ? `${currency} ${formatAmount(data.todayProfit.grossProfit)}`
-                : '—'
-            }
-            hint={
-              data?.todayProfit
-                ? data.todayProfit.unpricedBills > 0
-                  ? `${data.todayProfit.unpricedBills} bill(s) include an item with no recipe`
-                  : 'Sales minus the cost of the food'
-                : data && data.todayOrders > 0
-                  ? 'No recipe means no cost, so no profit'
-                  : 'No bills yet today'
-            }
-            Icon={Wallet}
-            to="/reports"
-            tone="success"
-          />
-          <StatCard
-            label="Stock on the shelf"
-            value={
-              data?.stock ? `${currency} ${formatAmount(data.stock.value)}` : '—'
-            }
-            hint={
-              data?.stock
-                ? `${data.stock.lowStockCount} low · ${data.stock.outOfStockCount} out`
-                : 'No stock list yet'
-            }
-            Icon={Package}
-            to="/stock"
-            tone="primary"
-          />
-          <StatCard
-            label="Spent today"
-            value={`${currency} ${formatAmount(data?.todayExpenses ?? 0)}`}
-            hint="Rent, bills, salaries, repairs"
-            Icon={TrendingUp}
-            to="/expenses"
-            tone="accent"
-          />
-          <StatCard
-            label="Items with no recipe"
-            value={String(data?.missingRecipes ?? 0)}
-            hint={
-              (data?.missingRecipes ?? 0) > 0
-                ? 'Their profit cannot be worked out'
-                : 'Every item is costed'
-            }
-            Icon={UtensilsCrossed}
-            to={can('menu') ? '/menu' : '/orders'}
-            tone={(data?.missingRecipes ?? 0) > 0 ? 'accent' : 'info'}
-          />
-        </div>
-      )}
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2">

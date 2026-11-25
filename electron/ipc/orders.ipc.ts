@@ -69,15 +69,8 @@ export function ordersHandlers(orders: OrdersService, print: PrintService): Hand
 
     [CHANNELS.orderCancel]: {
       capability: 'orders:cancel',
-      // `prepared` tells the app whether the kitchen already cooked the food:
-      // uncooked → stock returns; cooked → the cost is booked as wastage.
-      // Omitted, the service infers it from the order status (pending = not cooked).
-      schema: z.object({
-        id: z.number().int().positive(),
-        prepared: z.boolean().optional(),
-      }),
-      handler: (input: { id: number; prepared?: boolean }, context: HandlerContext) =>
-        orders.cancel(input, context.user.id),
+      schema: idSchema,
+      handler: (input: { id: number }) => orders.cancel(input.id),
     },
 
     [CHANNELS.orderInvoice]: {

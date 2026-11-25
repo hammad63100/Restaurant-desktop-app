@@ -312,7 +312,7 @@ export function renderShiftReportHtml(data: ShiftReport, paper: PaperSize): stri
 </head>
 <body>
   <h1>${isZ ? 'Z Report (day close)' : 'X Report (mid day)'}</h1>
-  <p class="center muted">FoodiesGo</p>
+  <p class="center muted">Gul Khan Fast Food</p>
   <hr />
   <table>
     <tr><td>Shift</td><td class="right">#${shift.id}</td></tr>
@@ -378,7 +378,7 @@ export function renderShiftReportHtml(data: ShiftReport, paper: PaperSize): stri
   }
 
   <hr />
-  <p class="center muted">Printed ${formatDate(toSqlDate())} · FoodiesGo</p>
+  <p class="center muted">Printed ${formatDate(toSqlDate())} · Gul Khan Fast Food</p>
 </body>
 </html>`;
 }

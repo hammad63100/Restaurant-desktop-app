@@ -1,4 +1,4 @@
-# FoodiesGo — Fast Food Management Desktop App
+# Gul Khan Fast Food — Fast Food Management Desktop App
 
 Offline Windows desktop app (Electron + React + TypeScript + Tailwind + SQLite) for taking orders,
 printing invoices, and keeping staff, vehicle, salary and sales records.
@@ -53,7 +53,7 @@ npm run dist:win   # Windows NSIS installer in release/
 
 ## 4. First run and sign-in
 
-1. The app creates `%APPDATA%\foodiesgo\data\fastfood.db` on first start.
+1. The app creates `%APPDATA%\gul-khan-fast-food\data\fastfood.db` on first start.
 2. Migrations in `electron/db/migrations/` run automatically (numbered, applied once).
 3. A default admin is created: **admin / admin123**, and the first login is forced to a
    **Set a new password** screen.
@@ -61,9 +61,9 @@ npm run dist:win   # Windows NSIS installer in release/
    `$env:SEED_DEMO=1; npm run dev`) — adds demo users `manager/manager123`, `cashier/cashier123`,
    a menu, staff and a few orders.
 
-Logs (failed logins, errors): `%APPDATA%\foodiesgo\logs\app.log`
-Backups: `%APPDATA%\foodiesgo\backups\` (automatic on close, last 7 kept).
-PDF/CSV exports: `Documents\FoodiesGo\`.
+Logs (failed logins, errors): `%APPDATA%\gul-khan-fast-food\logs\app.log`
+Backups: `%APPDATA%\gul-khan-fast-food\backups\` (automatic on close, last 7 kept).
+PDF/CSV exports: `Documents\Gul Khan Fast Food\`.
 
 ## 5. Features
 

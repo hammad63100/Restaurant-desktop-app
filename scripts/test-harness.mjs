@@ -62,12 +62,6 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
     discounts: load('db/repositories/discountsRepository.js').createDiscountsRepository(db),
     kot: load('db/repositories/kotRepository.js').createKotRepository(db),
     tables: load('db/repositories/tablesRepository.js').createTablesRepository(db),
-    inventory: load('db/repositories/inventoryRepository.js').createInventoryRepository(db),
-    recipes: load('db/repositories/recipeRepository.js').createRecipeRepository(db),
-    expenses: load('db/repositories/expensesRepository.js').createExpensesRepository(db),
-    recurringBills: load('db/repositories/recurringBillsRepository.js').createRecurringBillsRepository(db),
-    subRecipes: load('db/repositories/subRecipeRepository.js').createSubRecipeRepository(db),
-    stockOps: load('db/repositories/stockOpsRepository.js').createStockOpsRepository(db),
   };
 
   const { createAuthService } = load('services/authService.js');
@@ -83,13 +77,6 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
   const { buildRegistry, dispatch } = load('ipc/index.js');
   const { seedDefaultAdmin } = load('db/seed.js');
   const { seedDemoData } = load('db/seedDemo.js');
-
-  const stockDeduction = load('services/stockDeductionService.js').createStockDeductionService({
-    inventory: repositories.inventory,
-    orders: repositories.orders,
-    recipes: repositories.recipes,
-    catalog: repositories.catalog,
-  });
 
   const auth = createAuthService(repositories.users);
 
@@ -107,24 +94,13 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
         .find((row) => row.deliveryBoyId === deliveryBoyId)?.commission ?? 0,
   });
 
-  const subRecipeService = load('services/subRecipeService.js').createSubRecipeService({
-    subRecipes: repositories.subRecipes,
-    inventory: repositories.inventory,
-  });
-
   const reportsService = createReportsService({
-    expenses: repositories.expenses,
     orders: repositories.orders,
     catalog: repositories.catalog,
     staff: repositories.staff,
     vehicles: repositories.vehicles,
     staffService,
-    inventory: repositories.inventory,
-    stockOps: repositories.stockOps,
-    missingRecipes: () => repositories.catalog.countPricedItemsWithoutRecipe(),
-    recurring: repositories.recurringBills,
   });
-
 
   const csvService = createCsvService({
     reports: reportsService,
@@ -180,7 +156,6 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
       kot: repositories.kot,
       tables: repositories.tables,
       payments: repositories.payments,
-      stock: stockDeduction,
     }),
     staff: staffService,
     vehicles: createVehiclesService({ vehicles: repositories.vehicles, staff: repositories.staff }),
@@ -211,23 +186,6 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
       sequences: repositories.sequences,
       settings: repositories.settings,
     }),
-    inventory: load('services/inventoryService.js').createInventoryService({
-      inventory: repositories.inventory,
-      shifts: repositories.shifts,
-      stockOps: repositories.stockOps,
-    }),
-    recipes: load('services/recipeService.js').createRecipeService({
-      recipes: repositories.recipes,
-      catalog: repositories.catalog,
-      inventory: repositories.inventory,
-      settings: repositories.settings,
-    }),
-    expenses: load('services/expensesService.js').createExpensesService({
-      expenses: repositories.expenses,
-      shifts: repositories.shifts,
-      recurring: repositories.recurringBills,
-    }),
-    subRecipes: subRecipeService,
   });
 
   /** Calls a channel exactly like the Electron main process does. */
@@ -298,8 +256,6 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
     repositories,
     auth,
     registry,
-    /** The CSV service, so a report test can prove the file, not just the screen. */
-    csv: csvService,
     migrationsApplied,
     call,
     callOk,

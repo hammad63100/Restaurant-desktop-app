@@ -99,7 +99,7 @@ await runner.check('1.B a database with no restaurant tables is refused', async 
 
   const result = await harness.call('settings:backup-restore', { filePath: foreign });
   if (result.ok) throw new Error('a foreign database must not be restored');
-  if (!/not a FoodiesGo/i.test(result.error.message)) {
+  if (!/not a Gul Khan/i.test(result.error.message)) {
     throw new Error(`expected a helpful message, got: ${result.error.message}`);
   }
 });

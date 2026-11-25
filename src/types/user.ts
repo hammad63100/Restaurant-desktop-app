@@ -18,8 +18,6 @@ export const PAGE_DEFINITIONS: PageDefinition[] = [
   { key: 'udhaar', label: 'Udhaar', path: '/udhaar', group: 'main' },
   { key: 'tables', label: 'Tables', path: '/tables', group: 'main' },
   { key: 'shifts', label: 'Day close', path: '/shifts', group: 'main' },
-  { key: 'stock', label: 'Stock', path: '/stock', group: 'main' },
-  { key: 'expenses', label: 'Expenses', path: '/expenses', group: 'main' },
   { key: 'staff', label: 'Staff', path: '/staff', group: 'staff' },
   { key: 'vehicles', label: 'Vehicles', path: '/vehicles', group: 'staff' },
   { key: 'reports', label: 'Reports', path: '/reports', group: 'admin' },

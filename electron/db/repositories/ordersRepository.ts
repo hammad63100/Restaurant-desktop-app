@@ -40,7 +40,6 @@ interface OrderRow {
   created_at: string;
   created_by_name: string;
   printed_at: string | null;
-  cost_total: number | null;
 }
 
 interface OrderItemRow {
@@ -51,7 +50,6 @@ interface OrderItemRow {
   qty: number;
   line_total: number;
   notes: string;
-  cost_total: number | null;
 }
 
 const ORDER_SELECT = `
@@ -63,27 +61,13 @@ const ORDER_SELECT = `
          d.name AS delivery_boy_name,
          o.subtotal, o.discount, o.tax_percent, o.tax, o.total, o.notes,
          o.paid_amount, o.payment_status,
-         o.created_at, u.full_name AS created_by_name, i.printed_at,
-         CASE
-           WHEN COUNT(oi.id) = 0 THEN NULL
-           WHEN SUM(CASE WHEN oi.cost_total IS NULL THEN 1 ELSE 0 END) > 0 THEN NULL
-           ELSE SUM(oi.cost_total)
-         END AS cost_total
+         o.created_at, u.full_name AS created_by_name, i.printed_at
     FROM orders o
-    LEFT JOIN order_items oi ON oi.order_id = o.id
     LEFT JOIN invoices i ON i.order_id = o.id
     LEFT JOIN waiters w ON w.id = o.waiter_id
     LEFT JOIN delivery_boys d ON d.id = o.delivery_boy_id
     JOIN users u ON u.id = o.created_by
 `;
-
-/**
- * The aggregate needs a GROUP BY, and SQLite requires WHERE before GROUP BY.
- * Callers therefore build: ORDER_SELECT + WHERE … + ORDER_GROUP + ORDER BY …
- * Keeping the group clause separate is what stops "near WHERE: syntax error"
- * when a filtered list is prepared.
- */
-const ORDER_GROUP = 'GROUP BY o.id';
 
 const toSummary = (row: OrderRow): OrderSummary => ({
   id: row.id,
@@ -108,11 +92,6 @@ const toSummary = (row: OrderRow): OrderSummary => ({
   createdByName: row.created_by_name,
   waiterName: row.waiter_name,
   deliveryBoyName: row.delivery_boy_name,
-  costTotal: row.cost_total,
-  // Net sales after discount and EXCLUDING tax: tax is collected for the
-  // government, so counting it as the shop's income would flatter the profit.
-  profit:
-    row.cost_total === null ? null : row.subtotal - row.discount - row.cost_total,
 });
 
 const toItem = (row: OrderItemRow): OrderItemRecord => ({
@@ -123,7 +102,6 @@ const toItem = (row: OrderItemRow): OrderItemRecord => ({
   qty: row.qty,
   lineTotal: row.line_total,
   notes: row.notes,
-  costTotal: row.cost_total,
 });
 
 const toDetail = (row: OrderRow, items: OrderItemRecord[]): OrderDetail => ({
@@ -153,48 +131,15 @@ export function createOrdersRepository(db: AppDatabase) {
     )
   `);
   const insertOrderItem = db.prepare(`
-    INSERT INTO order_items (order_id, item_id, name, price, qty, line_total, notes, cost_total)
-    VALUES (@orderId, @itemId, @name, @price, @qty, @lineTotal, @notes, @costTotal)
-  `);
-  const setItemCost = db.prepare('UPDATE order_items SET cost_total = ? WHERE id = ?');
-  const insertItemStock = db.prepare(`
-    INSERT INTO order_item_stock
-      (order_item_id, ingredient_id, qty_base, unit_cost_milli, cost, created_at)
-    VALUES (@orderItemId, @ingredientId, @qtyBase, @unitCostMilli, @cost, @now)
-  `);
-  const deleteItemStock = db.prepare('DELETE FROM order_item_stock WHERE order_item_id = ?');
-  const selectItemStock = db.prepare<[number], {
-    ingredient_id: number;
-    ingredient_name: string;
-    qty_base: number;
-    unit_cost_milli: number;
-    cost: number;
-  }>(`
-    SELECT s.ingredient_id, i.name AS ingredient_name, s.qty_base, s.unit_cost_milli, s.cost
-      FROM order_item_stock s
-      JOIN ingredients i ON i.id = s.ingredient_id
-     WHERE s.order_item_id = ?
-     ORDER BY i.name COLLATE NOCASE
-  `);
-  const selectOrderStock = db.prepare<[number], {
-    order_item_id: number;
-    qty_base: number;
-    unit_cost_milli: number;
-    cost: number;
-  }>(`
-    SELECT s.order_item_id, s.qty_base, s.unit_cost_milli, s.cost
-      FROM order_item_stock s
-      JOIN order_items oi ON oi.id = s.order_item_id
-     WHERE oi.order_id = ?
+    INSERT INTO order_items (order_id, item_id, name, price, qty, line_total, notes)
+    VALUES (@orderId, @itemId, @name, @price, @qty, @lineTotal, @notes)
   `);
   const insertInvoice = db.prepare(`
     INSERT INTO invoices (invoice_no, order_id, printed_at, created_at) VALUES (?, ?, NULL, ?)
   `);
-  const selectOrderById = db.prepare<[number], OrderRow>(
-    `${ORDER_SELECT} WHERE o.id = ? ${ORDER_GROUP}`,
-  );
+  const selectOrderById = db.prepare<[number], OrderRow>(`${ORDER_SELECT} WHERE o.id = ?`);
   const selectItemsForOrder = db.prepare<[number], OrderItemRow>(
-    'SELECT id, item_id, name, price, qty, line_total, notes, cost_total FROM order_items WHERE order_id = ? ORDER BY id',
+    'SELECT id, item_id, name, price, qty, line_total, notes FROM order_items WHERE order_id = ? ORDER BY id',
   );
   const updateStatus = db.prepare(
     'UPDATE orders SET status = ?, updated_at = ?, cancelled_at = ? WHERE id = ?',
@@ -204,10 +149,10 @@ export function createOrdersRepository(db: AppDatabase) {
   /* ------------------------- merge / split (Phase 3) ------------------------- */
 
   const selectItemRows = db.prepare<[number], OrderItemRow>(
-    'SELECT id, item_id, name, price, qty, line_total, notes, cost_total FROM order_items WHERE order_id = ? ORDER BY id',
+    'SELECT id, item_id, name, price, qty, line_total, notes FROM order_items WHERE order_id = ? ORDER BY id',
   );
   const selectItemById = db.prepare<[number], OrderItemRow>(
-    'SELECT id, item_id, name, price, qty, line_total, notes, cost_total FROM order_items WHERE id = ?',
+    'SELECT id, item_id, name, price, qty, line_total, notes FROM order_items WHERE id = ?',
   );
   const deleteItem = db.prepare('DELETE FROM order_items WHERE id = ?');
   const reparentItem = db.prepare('UPDATE order_items SET order_id = ? WHERE id = ?');
@@ -351,7 +296,6 @@ export function createOrdersRepository(db: AppDatabase) {
         qty: number;
         lineTotal: number;
         notes: string;
-        costTotal?: number | null;
       }>;
     }): number {
       const run = db.transaction((payload: typeof input) => {
@@ -397,7 +341,7 @@ export function createOrdersRepository(db: AppDatabase) {
         const orderId = Number(result.lastInsertRowid);
 
         for (const item of payload.items) {
-          insertOrderItem.run({ orderId, ...item, costTotal: item.costTotal ?? null });
+          insertOrderItem.run({ orderId, ...item });
         }
 
         insertInvoice.run(payload.invoiceNo, orderId, now);
@@ -451,7 +395,7 @@ export function createOrdersRepository(db: AppDatabase) {
       }
 
       const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-      const sql = `${ORDER_SELECT} ${where} ${ORDER_GROUP} ORDER BY o.created_at DESC, o.id DESC LIMIT ?`;
+      const sql = `${ORDER_SELECT} ${where} ORDER BY o.created_at DESC, o.id DESC LIMIT ?`;
       params.push(filter.limit);
 
       const rows = db.prepare(sql).all(...params) as OrderRow[];
@@ -503,12 +447,9 @@ export function createOrdersRepository(db: AppDatabase) {
         qty: number;
         lineTotal: number;
         notes: string;
-        costTotal?: number | null;
       }>,
     ): void {
-      for (const item of items) {
-        insertOrderItem.run({ orderId, ...item, costTotal: item.costTotal ?? null });
-      }
+      for (const item of items) insertOrderItem.run({ orderId, ...item });
     },
 
     /** Customer / waiter / notes on an order, leaving money alone. */
@@ -563,66 +504,6 @@ export function createOrdersRepository(db: AppDatabase) {
 
     itemCount(orderId: number): number {
       return countItems.get(orderId)?.total ?? 0;
-    },
-
-    /** Writes the frozen cost of one order line. */
-    setItemCostTotal(orderItemId: number, costTotal: number | null): void {
-      setItemCost.run(costTotal, orderItemId);
-    },
-
-    /** One snapshot row: this line used this much of this ingredient at this cost. */
-    addItemStock(input: {
-      orderItemId: number;
-      ingredientId: number;
-      qtyBase: number;
-      unitCostMilli: number;
-      cost: number;
-    }): void {
-      insertItemStock.run({ ...input, now: toSqlDateTime() });
-    },
-
-    clearItemStock(orderItemId: number): void {
-      deleteItemStock.run(orderItemId);
-    },
-
-    /**
-     * Drops the per-line link from a line's ledger rows.
-     *
-     * An amendment deletes the old lines, and `stock_movements.ref_order_item_id`
-     * must not block that. The rows themselves stay (the shelf really did move);
-     * they keep `ref_order_id`, so the history still says which bill they belong to.
-     */
-    detachItemMovementRefs(orderItemId: number): void {
-      db.prepare('UPDATE stock_movements SET ref_order_item_id = NULL WHERE ref_order_item_id = ?').run(
-        orderItemId,
-      );
-    },
-
-    /** The ingredient snapshot of one line (for the invoice screen and tests). */
-    stockForItem(orderItemId: number) {
-      return selectItemStock.all(orderItemId).map((row) => ({
-        ingredientId: row.ingredient_id,
-        ingredientName: row.ingredient_name,
-        qtyBase: row.qty_base,
-        unitCostMilli: row.unit_cost_milli,
-        cost: row.cost,
-      }));
-    },
-
-    /** Every snapshot row of an order, used when re-valuing an amended bill. */
-    stockForOrder(orderId: number) {
-      return selectOrderStock.all(orderId).map((row) => ({
-        orderItemId: row.order_item_id,
-        qtyBase: row.qty_base,
-        unitCostMilli: row.unit_cost_milli,
-        cost: row.cost,
-      }));
-    },
-
-    /** Sum of the frozen costs of an order, or null when any line lacks one. */
-    orderCostTotal(orderId: number): number | null {
-      const row = selectOrderById.get(orderId);
-      return row ? row.cost_total : null;
     },
 
     /** Marks an order as absorbed by another one. Its money stays where it is. */
@@ -758,163 +639,6 @@ export function createOrdersRepository(db: AppDatabase) {
       }>;
     },
 
-    /**
-     * The P&L's top half (Roadmap 4.G): money from food, and what that food cost.
-     *
-     * Cancelled bills are out. Tax is out of the profit line on purpose — it is
-     * collected for the government and never was the shop's money. `cogs` is NULL
-     * when any sold line has no cost data, because a half-known cost would show a
-     * profit that is not real.
-     */
-    profitAndLoss(fromDate: string, toDate: string) {
-      const sales = db
-        .prepare<[string, string], {
-          orders: number;
-          subtotal: number;
-          discount: number;
-          tax: number;
-          total: number;
-        }>(`
-          SELECT COUNT(*) AS orders,
-                 COALESCE(SUM(subtotal), 0) AS subtotal,
-                 COALESCE(SUM(discount), 0) AS discount,
-                 COALESCE(SUM(tax), 0) AS tax,
-                 COALESCE(SUM(total), 0) AS total
-            FROM orders
-           WHERE status <> 'cancelled' AND date(created_at) BETWEEN ? AND ?
-        `)
-        .get(fromDate, toDate);
-
-      /*
-       * Cost is summed per BILL, not per line.
-       *
-       * `cogs` counts only bills whose every line has a cost. A bill saved before
-       * its item had a recipe carries no snapshot at all, and can never be priced
-       * honestly after the fact; treating it as zero would invent profit, and
-       * treating the whole period as unknown would make the P&L useless forever
-       * in any shop that added recipes later.
-       *
-       * So the two halves are reported side by side: `knownNetSales` and `cogs` are
-       * a like-for-like pair, and `unknownNetSales` says exactly how much of the
-       * period could not be priced. The screen shows the profit of what it can
-       * prove, and names the rest.
-       */
-      const cost = db
-        .prepare<[string, string], {
-          cogs_sales: number;
-          cogs: number;
-          unknown_sales: number;
-          unpriced_bills: number;
-          unpriced_lines: number;
-        }>(`
-          SELECT
-            COALESCE(SUM(CASE WHEN bad.unknown = 0 THEN bad.net_sales END), 0) AS cogs_sales,
-            -- Only fully-costed bills. Summing every bill's cost would charge the
-            -- known half of a mixed bill against sales that were excluded as
-            -- unknown, and the P&L would report a loss that never happened.
-            COALESCE(SUM(CASE WHEN bad.unknown = 0 THEN bad.cost END), 0) AS cogs,
-            COALESCE(SUM(CASE WHEN bad.unknown > 0 THEN bad.net_sales END), 0) AS unknown_sales,
-            COALESCE(SUM(CASE WHEN bad.unknown > 0 THEN 1 ELSE 0 END), 0) AS unpriced_bills,
-            COALESCE(SUM(bad.unknown), 0) AS unpriced_lines
-          FROM (
-            SELECT o.id,
-                   o.subtotal - o.discount AS net_sales,
-                   SUM(CASE WHEN oi.cost_total IS NULL THEN 1 ELSE 0 END) AS unknown,
-                   COALESCE(SUM(oi.cost_total), 0) AS cost
-              FROM orders o
-              JOIN order_items oi ON oi.order_id = o.id
-             WHERE o.status <> 'cancelled' AND date(o.created_at) BETWEEN ? AND ?
-             GROUP BY o.id
-          ) bad
-        `)
-        .get(fromDate, toDate);
-
-      const cancelled = db
-        .prepare<[string, string], { count: number; value: number }>(`
-          SELECT COUNT(*) AS count, COALESCE(SUM(total), 0) AS value
-            FROM orders
-           WHERE status = 'cancelled' AND date(created_at) BETWEEN ? AND ?
-        `)
-        .get(fromDate, toDate);
-
-      const wastage = db
-        .prepare<[string, string], { qty: number; value: number }>(`
-          SELECT COALESCE(SUM(ABS(qty)), 0) AS qty,
-                 COALESCE(SUM(ABS(ROUND(qty * unit_cost_milli / 1000))), 0) AS value
-            FROM stock_movements
-           WHERE kind = 'wastage' AND date(created_at) BETWEEN ? AND ?
-        `)
-        .get(fromDate, toDate);
-
-      return {
-        orders: sales?.orders ?? 0,
-        subtotal: sales?.subtotal ?? 0,
-        discount: sales?.discount ?? 0,
-        tax: sales?.tax ?? 0,
-        total: sales?.total ?? 0,
-        netSales: (sales?.subtotal ?? 0) - (sales?.discount ?? 0),
-        // Sales and cost of the SAME bills: the only pair a profit can come from.
-        knownNetSales: cost?.cogs_sales ?? 0,
-        cogs: cost?.cogs ?? 0,
-        unknownNetSales: cost?.unknown_sales ?? 0,
-        unpricedBills: cost?.unpriced_bills ?? 0,
-        linesWithoutCost: cost?.unpriced_lines ?? 0,
-        cancelled: cancelled?.count ?? 0,
-        cancelledValue: cancelled?.value ?? 0,
-        wastageQty: wastage?.qty ?? 0,
-        wastageValue: wastage?.value ?? 0,
-      };
-    },
-
-    /**
-     * Per-item profitability (4.G).
-     *
-     * Grouped by the snapshot on the SOLD line, not by the recipe: a bill keeps
-     * the cost it was charged, so editing a recipe today cannot improve yesterday's
-     * margin. Menu items with no recipe have `cost_total IS NULL` on their lines,
-     * which is exactly why the row reports priced and unpriced revenue separately
-     * instead of treating a missing cost as free food.
-     */
-    itemProfit(fromDate: string, toDate: string) {
-      return db
-        .prepare(
-          `SELECT oi.item_id AS itemId,
-                  oi.name AS name,
-                  SUM(oi.qty) AS qty,
-                  SUM(oi.line_total) AS revenue,
-                  COALESCE(SUM(CASE WHEN oi.cost_total IS NOT NULL THEN oi.line_total END), 0)
-                    AS pricedRevenue,
-                  COALESCE(SUM(oi.cost_total), 0) AS cost,
-                  COALESCE(SUM(CASE WHEN oi.cost_total IS NULL THEN oi.qty END), 0) AS unpricedQty,
-                  COALESCE(SUM(CASE WHEN oi.cost_total IS NULL THEN oi.line_total END), 0)
-                    AS unpricedRevenue,
-                  -- Does the item have a recipe RIGHT NOW? A line sold before the
-                  -- recipe existed has no cost, but the owner has already fixed the
-                  -- cause — telling them "no recipe" would send them hunting for a
-                  -- problem that no longer exists.
-                  EXISTS (
-                    SELECT 1 FROM recipe_items r
-                     WHERE r.item_id = oi.item_id
-                  ) AS hasRecipeNow
-             FROM order_items oi
-             JOIN orders o ON o.id = oi.order_id
-            WHERE o.status <> 'cancelled' AND date(o.created_at) BETWEEN ? AND ?
-            GROUP BY COALESCE(oi.item_id, -1), oi.name
-            ORDER BY revenue DESC`,
-        )
-        .all(fromDate, toDate) as Array<{
-        itemId: number | null;
-        name: string;
-        qty: number;
-        revenue: number;
-        pricedRevenue: number;
-        cost: number;
-        unpricedQty: number;
-        unpricedRevenue: number;
-        hasRecipeNow: number;
-      }>;
-    },
-
     deliveriesByBoy(fromDate: string, toDate: string) {
       return db
         .prepare(
@@ -945,7 +669,7 @@ export function createOrdersRepository(db: AppDatabase) {
 
     recent(limit = 8): OrderSummary[] {
       const rows = db
-        .prepare(`${ORDER_SELECT} ${ORDER_GROUP} ORDER BY o.created_at DESC, o.id DESC LIMIT ?`)
+        .prepare(`${ORDER_SELECT} ORDER BY o.created_at DESC, o.id DESC LIMIT ?`)
         .all(limit) as OrderRow[];
       return rows.map(toSummary);
     },

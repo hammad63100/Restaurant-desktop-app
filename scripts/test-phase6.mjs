@@ -228,8 +228,8 @@ await runner.check('the Windows installer is configured correctly', async () => 
 
   // Everything the packaged app needs at runtime.
   for (const fragment of [
-    'appId: com.foodiesgo.app',
-    'productName: FoodiesGo',
+    'appId: com.gulkhan.fastfood',
+    'productName: Gul Khan Fast Food',
     'dist/**/*',
     'dist-electron/**/*',
     'package.json',

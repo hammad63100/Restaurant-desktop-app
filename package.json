@@ -1,9 +1,9 @@
 {
-  "name": "foodiesgo",
+  "name": "gul-khan-fast-food",
   "version": "0.1.0",
   "private": true,
-  "description": "Offline fast food management desktop app for FoodiesGo",
-  "author": "FoodiesGo",
+  "description": "Offline fast food management desktop app for Gul Khan Fast Food",
+  "author": "Gul Khan Fast Food",
   "license": "UNLICENSED",
   "main": "dist-electron/electron/main.js",
   "scripts": {

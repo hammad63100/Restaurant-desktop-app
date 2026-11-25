@@ -32,17 +32,6 @@ import { createKotService } from './services/kotService';
 import { createKotRepository } from './db/repositories/kotRepository';
 import { createTablesRepository } from './db/repositories/tablesRepository';
 import { createTablesService } from './services/tablesService';
-import { createInventoryRepository } from './db/repositories/inventoryRepository';
-import { createInventoryService } from './services/inventoryService';
-import { createRecipeRepository } from './db/repositories/recipeRepository';
-import { createExpensesRepository } from './db/repositories/expensesRepository';
-import { createStockOpsRepository } from './db/repositories/stockOpsRepository';
-import { createRecurringBillsRepository } from './db/repositories/recurringBillsRepository';
-import { createSubRecipeRepository } from './db/repositories/subRecipeRepository';
-import { createSubRecipeService } from './services/subRecipeService';
-import { createRecipeService } from './services/recipeService';
-import { createStockDeductionService } from './services/stockDeductionService';
-import { createExpensesService } from './services/expensesService';
 import { createBackupService } from './services/backupService';
 import { createPrintService } from './services/printService';
 import { buildRegistry, dispatch } from './ipc';
@@ -84,7 +73,7 @@ function backupDirectory(): string {
 }
 
 function exportDirectory(): string {
-  return path.join(app.getPath('documents'), 'FoodiesGo');
+  return path.join(app.getPath('documents'), 'Gul Khan Fast Food');
 }
 
 /**
@@ -121,18 +110,12 @@ async function bootstrapServices(): Promise<void> {
   const ordersRepo = createOrdersRepository(db);
   const staffRepo = createStaffRepository(db);
   const vehiclesRepo = createVehiclesRepository(db);
-  const recurringBillsRepo = createRecurringBillsRepository(db);
-  const subRecipeRepo = createSubRecipeRepository(db);
   const sequences = createSequenceRepository(db);
   const paymentsRepo = createPaymentsRepository(db);
   const shiftsRepo = createShiftsRepository(db);
   const discountsRepo = createDiscountsRepository(db);
   const kotRepo = createKotRepository(db);
   const tablesRepo = createTablesRepository(db);
-  const inventoryRepo = createInventoryRepository(db);
-  const recipeRepo = createRecipeRepository(db);
-  const expensesRepo = createExpensesRepository(db);
-  const stockOpsRepo = createStockOpsRepository(db);
 
   await seedDefaultAdmin(users);
   if (allowDemoData) {
@@ -145,14 +128,6 @@ async function bootstrapServices(): Promise<void> {
       sequences,
     });
   }
-
-  // One instance shared by the order service (deduct/reverse) and the tests.
-  const stockDeduction = createStockDeductionService({
-    inventory: inventoryRepo,
-    orders: ordersRepo,
-    recipes: recipeRepo,
-    catalog: catalogRepo,
-  });
 
   const auth = createAuthService(users);
 
@@ -239,15 +214,11 @@ async function bootstrapServices(): Promise<void> {
   });
 
   const reportsService = createReportsService({
-    expenses: expensesRepo,
     orders: ordersRepo,
     catalog: catalogRepo,
     staff: staffRepo,
     vehicles: vehiclesRepo,
     staffService,
-    inventory: inventoryRepo,
-    stockOps: stockOpsRepo,
-    missingRecipes: () => catalogRepo.countPricedItemsWithoutRecipe(),
   });
 
   const csvService = createCsvService({
@@ -272,8 +243,6 @@ async function bootstrapServices(): Promise<void> {
       kot: kotRepo,
       // Seats a dine-in order and enforces one open bill per table.
       tables: tablesRepo,
-      // Takes the ingredients off the shelf for every saved line (4.D).
-      stock: stockDeduction,
     }),
     staff: staffService,
     vehicles: createVehiclesService({ vehicles: vehiclesRepo, staff: staffRepo }),
@@ -292,26 +261,6 @@ async function bootstrapServices(): Promise<void> {
       orders: ordersRepo,
       payments: paymentsRepo,
       sequences,
-      settings: settingsRepo,
-    }),
-    inventory: createInventoryService({
-      inventory: inventoryRepo,
-      shifts: shiftsRepo,
-      stockOps: stockOpsRepo,
-    }),
-    expenses: createExpensesService({
-      expenses: expensesRepo,
-      shifts: shiftsRepo,
-      recurring: recurringBillsRepo,
-    }),
-    subRecipes: createSubRecipeService({
-      subRecipes: subRecipeRepo,
-      inventory: inventoryRepo,
-    }),
-    recipes: createRecipeService({
-      recipes: recipeRepo,
-      catalog: catalogRepo,
-      inventory: inventoryRepo,
       settings: settingsRepo,
     }),
   });
@@ -384,7 +333,7 @@ function createMainWindow(): void {
     minHeight: 720,
     show: false,
     backgroundColor: '#F8F9FA',
-    title: 'FoodiesGo',
+    title: 'Gul Khan Fast Food',
     icon: windowIcon(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -440,7 +389,7 @@ if (!hasSingleInstanceLock) {
     } catch (error) {
       logError('Startup failed while preparing the database', error);
       dialog.showErrorBox(
-        'Cannot start FoodiesGo',
+        'Cannot start Gul Khan Fast Food',
         'The database could not be opened. Please close any other copy of the app and try again.',
       );
       app.quit();

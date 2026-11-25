@@ -9,7 +9,7 @@ export interface SettingRow {
 }
 
 const DEFAULTS: ShopSettings = {
-  shopName: 'FoodiesGo',
+  shopName: 'Gul Khan Fast Food',
   shopAddress: '',
   shopPhone: '',
   shopLogo: null,

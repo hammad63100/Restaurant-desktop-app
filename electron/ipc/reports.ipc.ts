@@ -16,49 +16,6 @@ export function reportsHandlers(reports: ReportsService, csv: CsvService): Handl
       handler: (input: DateRange) => reports.range(input),
     },
 
-    [CHANNELS.reportProfit]: {
-      // The owner's own numbers: cost, profit and the shop's expenses. A manager
-      // without costs:read is deliberately left out (same rule as 4.C).
-      capability: 'costs:read',
-      schema: dateRangeSchema,
-      handler: (input: DateRange) => reports.profitAndLoss(input),
-    },
-
-    /*
-     * All five of the 4.G report reads are `costs:read`: item profit, stock
-     * valuation (which is money), purchases, wastage value and expenses are the
-     * owner's private numbers, exactly like the P&L above.
-     */
-
-    [CHANNELS.reportItemProfit]: {
-      capability: 'costs:read',
-      schema: dateRangeSchema,
-      handler: (input: DateRange) => reports.itemProfit(input),
-    },
-
-    [CHANNELS.reportStockValuation]: {
-      capability: 'costs:read',
-      handler: () => reports.stockValuation(),
-    },
-
-    [CHANNELS.reportPurchases]: {
-      capability: 'costs:read',
-      schema: dateRangeSchema,
-      handler: (input: DateRange) => reports.purchaseReport(input),
-    },
-
-    [CHANNELS.reportWastage]: {
-      capability: 'costs:read',
-      schema: dateRangeSchema,
-      handler: (input: DateRange) => reports.wastageReport(input),
-    },
-
-    [CHANNELS.reportExpenses]: {
-      capability: 'costs:read',
-      schema: dateRangeSchema,
-      handler: (input: DateRange) => reports.expenseReport(input),
-    },
-
     [CHANNELS.reportSalary]: {
       capability: 'reports:read',
       schema: monthSchema,

@@ -129,13 +129,6 @@ export function createVehiclesRepository(db: AppDatabase) {
      WHERE vehicle_id = ? AND date BETWEEN ? AND ?
      ORDER BY date DESC, id DESC
   `);
-  // Fleet-wide spend in a range (4.G): the P&L needs the total, not one vehicle's.
-  const sumExpensesBetween = db.prepare<[string, string], { total: number | null; count: number }>(
-    'SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS count FROM vehicle_expenses WHERE date BETWEEN ? AND ?',
-  );
-  const sumExpensesByType = db.prepare<[string, string], { type: string; total: number }>(
-    'SELECT type, SUM(amount) AS total FROM vehicle_expenses WHERE date BETWEEN ? AND ? GROUP BY type',
-  );
   const insertExpense = db.prepare(`
     INSERT INTO vehicle_expenses (vehicle_id, type, amount, date, note, created_at)
     VALUES (@vehicleId, @type, @amount, @date, @note, @now)
@@ -229,25 +222,6 @@ export function createVehiclesRepository(db: AppDatabase) {
 
     deleteExpense(id: number): void {
       deleteExpense.run(id);
-    },
-
-    /**
-     * Fuel, maintenance and repairs across the whole fleet in a range (4.G).
-     *
-     * Broken down by type because fuel and a repair are different kinds of cost:
-     * fuel scales with deliveries, a repair is a one-off the owner can question.
-     */
-    expensesBetween(fromDate: string, toDate: string): {
-      total: number;
-      count: number;
-      byType: Array<{ type: string; total: number }>;
-    } {
-      const row = sumExpensesBetween.get(fromDate, toDate);
-      return {
-        total: row?.total ?? 0,
-        count: row?.count ?? 0,
-        byType: sumExpensesByType.all(fromDate, toDate),
-      };
     },
 
     /** Vehicles whose registration or insurance expires on/before `beforeDate`. */

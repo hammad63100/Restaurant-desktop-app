@@ -1,6 +1,6 @@
-appId: com.foodiesgo.app
-productName: FoodiesGo
-copyright: Copyright © 2026 FoodiesGo
+appId: com.gulkhan.fastfood
+productName: Gul Khan Fast Food
+copyright: Copyright © 2026 Gul Khan Fast Food
 
 directories:
   output: release
@@ -38,4 +38,4 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: FoodiesGo
+  shortcutName: Gul Khan Fast Food

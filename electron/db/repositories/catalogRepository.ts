@@ -174,31 +174,6 @@ export function createCatalogRepository(db: AppDatabase) {
     countActiveItems(): number {
       return countActiveItems.get()?.total ?? 0;
     },
-
-    /**
-     * Active menu items that carry a price but no recipe (4.G dashboard card).
-     *
-     * A priced item with no recipe can still be sold, and every such sale has an
-     * unknown cost — the single clearest thing the owner can fix to make the P&L
-     * complete. Returns 0 rather than throwing when the recipe tables are absent.
-     */
-    countPricedItemsWithoutRecipe(): number {
-      const hasRecipes = db
-        .prepare("SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'table' AND name = 'recipe_items'")
-        .get() as { total: number };
-      if (hasRecipes.total === 0) return 0;
-
-      return (
-        db
-          .prepare<[], { total: number }>(
-            `SELECT COUNT(*) AS total
-               FROM items i
-              WHERE i.active = 1 AND i.price > 0
-                AND NOT EXISTS (SELECT 1 FROM recipe_items r WHERE r.item_id = i.id)`,
-          )
-          .get()?.total ?? 0
-      );
-    },
   };
 }
 

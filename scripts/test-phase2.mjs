@@ -76,16 +76,16 @@ await runner.check('admin reads and saves settings, tax is stored as an integer'
   await harness.loginAs('admin', 'OwnerPass123');
 
   const before = await harness.callOk('settings:get');
-  if (before.shopName !== 'FoodiesGo') throw new Error('default shop name missing');
+  if (before.shopName !== 'Gul Khan Fast Food') throw new Error('default shop name missing');
 
   const saved = await harness.callOk('settings:save', {
     ...before,
-    shopName: 'FoodiesGo — Blue Area',
+    shopName: 'Gul Khan Fast Food — Blue Area',
     taxPercent: 5,
     receiptWidth: 'a4',
   });
 
-  if (saved.shopName !== 'FoodiesGo — Blue Area') throw new Error('shop name not saved');
+  if (saved.shopName !== 'Gul Khan Fast Food — Blue Area') throw new Error('shop name not saved');
   if (saved.taxPercent !== 5) throw new Error('tax percent not saved');
   if (saved.receiptWidth !== 'a4') throw new Error('receipt width not saved');
 });

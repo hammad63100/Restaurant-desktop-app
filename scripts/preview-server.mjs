@@ -35,11 +35,6 @@ if (!existsSync(compiledDir)) {
 
 const load = (relative) => require(path.join(compiledDir, relative));
 
-// The same month maths the app uses. The preview serves the renderer from a browser,
-// so it has no access to the Electron main process and must build these itself —
-// importing them rather than re-deriving keeps the two from drifting.
-const { monthStart, monthEnd } = load('utils/datetime.js');
-
 const tempDir = mkdtempSync(path.join(os.tmpdir(), 'gulkhan-preview-'));
 const { openDatabase, closeDatabase, getDatabase } = load('db/connection.js');
 const { runMigrations } = load('db/migrate.js');
@@ -63,12 +58,6 @@ const repos = {
   discounts: load('db/repositories/discountsRepository.js').createDiscountsRepository(db),
   kot: load('db/repositories/kotRepository.js').createKotRepository(db),
   tables: load('db/repositories/tablesRepository.js').createTablesRepository(db),
-  inventory: load('db/repositories/inventoryRepository.js').createInventoryRepository(db),
-  recipes: load('db/repositories/recipeRepository.js').createRecipeRepository(db),
-  expenses: load('db/repositories/expensesRepository.js').createExpensesRepository(db),
-  stockOps: load('db/repositories/stockOpsRepository.js').createStockOpsRepository(db),
-  recurringBills: load('db/repositories/recurringBillsRepository.js').createRecurringBillsRepository(db),
-  subRecipes: load('db/repositories/subRecipeRepository.js').createSubRecipeRepository(db),
 };
 
 // Printing needs a real window. The preview throws so the UI reports it honestly,
@@ -89,13 +78,6 @@ const printStub = {
   renderKotHtml: load('services/printService.js').renderKotHtml,
 };
 
-const stockDeduction = load('services/stockDeductionService.js').createStockDeductionService({
-  inventory: repos.inventory,
-  orders: repos.orders,
-  recipes: repos.recipes,
-  catalog: repos.catalog,
-});
-
 const auth = load('services/authService.js').createAuthService(repos.users);
 const discountsService = load('services/discountsService.js').createDiscountsService({
   discounts: repos.discounts,
@@ -106,20 +88,15 @@ const staffService = load('services/staffService.js').createStaffService({
   vehicles: repos.vehicles,
   commissionForMonth: (deliveryBoyId, month) =>
     repos.orders
-      .deliveriesByBoy(monthStart(month), monthEnd(month))
+      .deliveriesByBoy(`${month}-01`, `${monthEnd(month)}`)
       .find((row) => row.deliveryBoyId === deliveryBoyId)?.commission ?? 0,
 });
 const reportsService = load('services/reportsService.js').createReportsService({
-  expenses: repos.expenses,
   orders: repos.orders,
   catalog: repos.catalog,
   staff: repos.staff,
   vehicles: repos.vehicles,
   staffService,
-  inventory: repos.inventory,
-  stockOps: repos.stockOps,
-  missingRecipes: () => repos.catalog.countPricedItemsWithoutRecipe(),
-  recurring: repos.recurringBills,
 });
 
 const registry = buildRegistry({
@@ -136,7 +113,6 @@ const registry = buildRegistry({
     kot: repos.kot,
     tables: repos.tables,
     payments: repos.payments,
-    stock: stockDeduction,
   }),
   staff: staffService,
   vehicles: load('services/vehiclesService.js').createVehiclesService({
@@ -179,26 +155,6 @@ const registry = buildRegistry({
     orders: repos.orders,
     payments: repos.payments,
     sequences: repos.sequences,
-    settings: repos.settings,
-  }),
-  inventory: load('services/inventoryService.js').createInventoryService({
-    inventory: repos.inventory,
-    shifts: repos.shifts,
-    stockOps: repos.stockOps,
-  }),
-  expenses: load('services/expensesService.js').createExpensesService({
-    expenses: repos.expenses,
-    shifts: repos.shifts,
-    recurring: repos.recurringBills,
-  }),
-  subRecipes: load('services/subRecipeService.js').createSubRecipeService({
-    subRecipes: repos.subRecipes,
-    inventory: repos.inventory,
-  }),
-  recipes: load('services/recipeService.js').createRecipeService({
-    recipes: repos.recipes,
-    catalog: repos.catalog,
-    inventory: repos.inventory,
     settings: repos.settings,
   }),
 });
@@ -252,15 +208,7 @@ function serveStatic(requestUrl, response) {
   const filePath = path.join(distDir, relative);
   const safePath = filePath.startsWith(distDir) ? filePath : path.join(distDir, 'index.html');
 
-  /*
-   * Anything that is not a real file is the app itself, and the app needs the
-   * preview bridge injected. That includes `/` — serving dist/index.html raw here
-   * gave a window with no `window.api`, so the login form sat there doing nothing.
-   * Only a genuine asset (js, css, png) is served byte-for-byte.
-   */
-  const isAsset = path.extname(safePath) !== '' && path.extname(safePath) !== '.html';
-
-  if (!isAsset || !existsSync(safePath) || statSync(safePath).isDirectory()) {
+  if (!existsSync(safePath) || statSync(safePath).isDirectory()) {
     response.writeHead(200, { 'Content-Type': MIME['.html'] });
     response.end(previewHtml());
     return;

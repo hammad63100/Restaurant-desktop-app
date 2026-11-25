@@ -25,29 +25,6 @@ export function createShiftsService(deps: { shifts: ShiftsRepository; orders: Or
     const sumOf = (kind: CashMovementKind) =>
       movements.filter((row) => row.kind === kind).reduce((total, row) => total + row.amount, 0);
 
-    /**
-     * A voided purchase gives its cash back as a `cash_in` row naming the purchase.
-     *
-     * Netting is per shift, not across the books. When the reversal lands in the
-     * same shift that paid, the expense and the return cancel and the report reads
-     * "nothing happened" — the honest answer. When the paying shift is already
-     * closed, the reversal sits in today's shift with no matching expense there,
-     * so it must count as cash in (otherwise today's expenses would go negative).
-     */
-    const expensePurchaseIds = new Set(
-      movements
-        .filter((row) => row.kind === 'expense' && row.refPurchaseId !== null)
-        .map((row) => row.refPurchaseId as number),
-    );
-    const purchaseReversals = movements
-      .filter(
-        (row) =>
-          row.kind === 'cash_in' &&
-          row.refPurchaseId !== null &&
-          expensePurchaseIds.has(row.refPurchaseId),
-      )
-      .reduce((total, row) => total + row.amount, 0);
-
     // An X report still needs the expected drawer figure, computed live; a closed
     // shift uses the number stored at close time.
     const expectedCash = shift.expectedCash ?? shifts.expectedCash(shift.id, shift.openingCash);
@@ -60,14 +37,13 @@ export function createShiftsService(deps: { shifts: ShiftsRepository; orders: Or
       totalSales: salesByMethod.reduce((total, row) => total + row.total, 0),
       orderCount: stats.active.count,
       cashSales: salesByMethod.find((row) => row.method === 'cash')?.total ?? 0,
-      cashIn: sumOf('cash_in') - purchaseReversals,
+      cashIn: sumOf('cash_in'),
       cashOut: sumOf('cash_out'),
       refunds: sumOf('refund'),
-      expenses: sumOf('expense') - purchaseReversals,
+      expenses: sumOf('expense'),
       discountTotal: stats.active.discount,
       cancelledCount: stats.cancelled.count,
       cancelledValue: stats.cancelled.value,
-      purchaseReversals,
       topItems: orders.topItems(from, to, 5),
       variance: shift.difference,
     };

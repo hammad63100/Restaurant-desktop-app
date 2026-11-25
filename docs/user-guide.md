@@ -177,99 +177,14 @@ Go to **Reports**. Pick a date range with the buttons: **Today**, **Last 7 days*
 
 | Tab | Shows |
 | --- | --- |
-| **Profit & loss** | Net sales, cost of the food sold, gross profit, shop expenses, salaries, vehicle costs, net profit |
-| **Item profit** | Which items make money and which do not, with margin per item |
-| **Stock value** | What the food on the shelf is worth, and how much is tied up in low stock |
-| **Purchases** | Bills by supplier, and **by ingredient with a price trend** — "chicken went up 12%" at a glance |
-| **Wastage** | What was thrown away, why, and what it cost |
-| **Expenses** | Shop spending by category, by wallet (drawer / bank) and by day |
 | **Sales** | Daily sales table, totals, discount given, cancelled count, split by order type |
 | **Top items** | What sells the most, by quantity and revenue |
 | **Deliveries** | Deliveries per rider and their commission |
 | **Salaries** | Net pay for every staff member for a chosen month, and whether it is paid |
 | **Vehicle costs** | Fuel, maintenance and total per vehicle |
 
-The first six tabs are the owner's private numbers and are hidden from a cashier.
-
-**Reading the profit & loss.** Two rules explain most of the questions it raises:
-
-- **Wastage is already inside the cost of food.** It is not subtracted a second time, or the
-  profit would be understated twice for the same spoiled packet.
-- **A sale is costed at the price on the day it was sold.** If chicken gets dearer next week,
-  last week's profit does not change.
-
 Click **Export CSV** to save the open tab and open it in Excel. Files go to
 `Documents\Gul Khan Fast Food`.
-
-> The export button does nothing in the browser preview. It needs the desktop app, where it
-> opens the normal Windows save dialog.
-
----
-
-## 8a. Stock (admin / manager)
-
-Go to **Stock**. This is where the app learns what is in the kitchen.
-
-| Tab | What you do there |
-| --- | --- |
-| **Stock levels** | Every ingredient, what is left, and what it is worth. Red means below the reorder level |
-| **Purchases** | Enter a supplier bill. Do this **when the delivery arrives**, not at month end |
-| **Wastage** | Record food thrown away — spoiled, dropped, expired, staff meal |
-| **Stock counts** | Count the shelf and correct the app to match. Count weekly at first |
-| **House-made** | Things the kitchen makes itself — see below |
-| **Suppliers** | Who you buy from |
-
-**Opening stock — do this once, on the day you start.** Click **Opening stock** on the Stock
-levels tab. For each thing already on the shelf, enter how much there is and what it cost you per
-kilo/litre/piece. This is what makes the first day's profit correct instead of impossibly high.
-It does **not** create a supplier bill, because you are not buying it now — you already own it.
-
-**Recording a purchase.** Click **Purchases → Add purchase**, pick the supplier, and add each
-ingredient with the quantity and price on the bill. If the extra charges (delivery, loading) are
-on the bill, put them in **Extra charges** — the app spreads them across the lines so the cost per
-kilo is the real delivered cost.
-
-**Supplier return.** Open the ingredient, then **Return to supplier**. Use this when part of a
-delivery was bad. The bill stays as it is — you still owe for the rest — and the returned quantity
-comes back off your shelf. It is not the same as voiding a bill.
-
-### House-made ingredients
-
-If the kitchen makes its own mayo, marinade or coating mix, tell the app and it will work out the
-cost for you.
-
-1. **Stock → House-made → Make something in-house**, and pick the ingredient.
-2. Say **how much one batch makes** — for example, 1,000 g of mayo.
-3. Add **what goes into one batch** — 400 ml oil, 2 eggs.
-4. Save. The cost is now worked out from the oil and egg prices by itself.
-
-When the kitchen actually makes a batch, click **Make** on that row and say how many batches. The
-oil and eggs come off the shelf and the mayo goes on, at what it cost to make.
-
-> You never type the price of a house-made ingredient. That is the point — if oil gets dearer, the
-> mayo cost follows it automatically instead of quietly going stale.
-
----
-
-## 8b. Expenses and monthly bills (admin / manager)
-
-Go to **Expenses** for the shop's own spending: rent, electricity, tea for the staff, repairs.
-This is separate from purchases — buying chicken puts stock on the shelf; paying the electricity
-bill does not.
-
-**Monthly bills.** Most of these repeat every month. Add them once under **Monthly bills** and the
-dashboard will tell you when one is due:
-
-1. **Expenses → Monthly bills → Add a bill**.
-2. Give it a name, a category, the day of the month it is due, and roughly what it costs.
-3. The amount is only a hint to fill the form faster. **Nothing is ever added to your expenses
-   until you confirm it.** When the bill arrives, click **Pay**, check the amount, and it is
-   recorded in that month.
-
-The dashboard shows a reminder when a bill is due soon or already late. If you did not pay one
-month, mark it **Skipped** and the reminder stops without inventing an expense.
-
-> Day 31 means "the last day" — so in February it is due on the 28th, which is what you want.
 
 ---
 
@@ -363,15 +278,7 @@ then **close the app** so it backs up.
 | Change a price | **Menu** → item → **Edit** |
 | Mark someone absent | **Staff** → person → tap the day |
 | See what a rider earned | **Staff** → rider → month → salary slip |
-| Know today's sales | **Dashboard**, or **Reports** → **Today** |
-| Know today's profit | **Dashboard** → *Today's gross profit*, or **Reports → Profit & loss** |
-| Enter a delivery that arrived | **Stock → Purchases → Add purchase** |
-| Record food that spoiled | **Stock → Wastage** |
-| Correct the shelf after counting | **Stock → Stock counts** |
-| Say what the kitchen makes itself | **Stock → House-made** |
-| Add rent or the electricity bill | **Expenses → Record expense** |
-| Stop forgetting a monthly bill | **Expenses → Monthly bills → Add a bill** |
-| Set the stock you already had on day one | **Stock → Opening stock** |
+| Know today's sales | **Dashboard**, or **Reports → Today** |
 | Give the accountant numbers | **Reports** → pick the tab → **Export CSV** |
 | Reset a forgotten password | **Users** → **Reset password** |
 | Back up to USB | **Settings** → Backups → copy the newest file |
