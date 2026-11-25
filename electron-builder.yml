@@ -1,0 +1,41 @@
+appId: com.foodiesgo.app
+productName: FoodiesGo
+copyright: Copyright © 2026 FoodiesGo
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+
+# better-sqlite3 13 and bcrypt 6 ship N-API prebuilt binaries, so no native
+# rebuild against Electron headers is needed (and no network access on build).
+npmRebuild: false
+
+# Native modules must stay unpacked so the .node binaries can be loaded.
+asar: true
+asarUnpack:
+  - '**/node_modules/better-sqlite3/**'
+  - '**/node_modules/bcrypt/**'
+
+extraMetadata:
+  main: dist-electron/electron/main.js
+
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: '${productName}-${version}-Setup.${ext}'
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: FoodiesGo
